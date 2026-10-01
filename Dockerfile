@@ -1,4 +1,4 @@
-FROM m.daocloud.io/docker.io/node:22-alpine
+FROM node:24-alpine
 
 ARG HOST_PROXY
 ENV HTTP_PROXY=${HOST_PROXY}
