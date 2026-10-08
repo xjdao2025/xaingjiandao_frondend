@@ -169,3 +169,51 @@ it('uses the task copy for requested changes while preserving the administrator 
   expect(html).toContain('提交成果')
   expect(html).not.toContain('结果未被认可')
 })
+
+it('shows a multi-assignee worker their own progress instead of the aggregate task status', () => {
+  const me = { id: 'worker-0', did: 'did:example:worker-0', handle: 'worker-0', nickname: '阿青' }
+  const task = {
+    id: 'task-multiple', title: '多人清理步道', description: '说明', status: 'in_progress', capacity: 3,
+    creator: { id: 'publisher', did: 'did:example:publisher', handle: 'publisher' },
+    assignee: null, assignees: [me], appointed_count: 2, application_count: 3,
+    reward_amount: 10, total_reward_amount: 30, reward_status: 'reserved',
+    application_deadline: '2099-09-21T09:00:00Z', execution_deadline: '2099-09-22T09:00:00Z',
+    my_status: 'completed', my_application_status: 'appointed',
+    applications: null, submissions: [{ id: 's', user: me, status: 'approved', body: '成果', inserted_at: '2026-09-29T09:00:00Z' }],
+    events: [], allowed_actions: [],
+  } as unknown as RiceTask
+  state.session = { token: 'token', user: me } as RiceSession
+  const render = (value: RiceTask) => renderToStaticMarkup(<TaskDetailPage taskId={value.id} initial={{ task: value, error: '', viewerToken: 'token' }} />)
+  const html = render(task)
+  expect(html).toContain('我的进度：已完成')
+  expect(html).toContain('10 稻米已发放到你的账户')
+  expect(html).not.toContain('>进行中<')
+  expect(render({ ...task, my_status: 'overdue' })).toContain('已过交成果的时间')
+  expect(render({ ...task, my_status: 'under_review' })).toContain('等发起人验收')
+  expect(render({ ...task, my_status: 'in_progress', my_application_status: 'released' })).toContain('撤销了对你的指派')
+})
+
+it('lets an administrator release a worker or end a multi-assignee task early only when the backend allows it', () => {
+  const users = ['阿青', '小林'].map((nickname, i) => ({ id: `worker-${i}`, did: `did:example:worker-${i}`, handle: `worker-${i}`, nickname }))
+  const task = {
+    id: 'task-multiple', title: '多人清理步道', description: '说明', status: 'in_progress', capacity: 3,
+    creator: { id: 'publisher', did: 'did:example:publisher', handle: 'publisher' },
+    assignee: null, assignees: users, appointed_count: 2, application_count: 2,
+    reward_amount: 10, total_reward_amount: 30, reward_status: 'reserved',
+    application_deadline: '2099-09-21T09:00:00Z', execution_deadline: '2099-09-22T09:00:00Z',
+    applications: [
+      { id: 'app-0', status: 'appointed', state: 'appointed', user: users[0], contact: '微信 a' },
+      { id: 'app-1', status: 'appointed', state: 'under_review', user: users[1] },
+    ],
+    submissions: [], events: [], allowed_actions: ['release_assignee', 'close'],
+  } as unknown as RiceTask
+  state.session = { token: 'token', user: { id: 'publisher' } } as RiceSession
+  const render = (value: RiceTask) => renderToStaticMarkup(<TaskDetailPage taskId={value.id} initial={{ task: value, error: '', viewerToken: 'token' }} />)
+  const html = render(task)
+  expect(html.match(/撤销指派/g)).toHaveLength(1)
+  expect(html).toContain('微信 a')
+  expect(html).toContain('提前结束任务')
+  const locked = render({ ...task, allowed_actions: ['release_assignee'] })
+  expect(locked).not.toContain('提前结束任务')
+  expect(render({ ...task, allowed_actions: [] })).not.toContain('撤销指派')
+})

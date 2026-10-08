@@ -118,7 +118,7 @@ export const updateTask = createServerFn({ method: 'POST' })
     return body.data
   })
 
-const taskAction = async (token: string, taskId: string, action: 'publish' | 'cancel') => {
+const taskAction = async (token: string, taskId: string, action: 'publish' | 'cancel' | 'close') => {
   const body = await requestJson<{ data: RiceTask }>(
     `${BACKEND_BASE}/api/tasks/${taskId}/${action}`,
     { method: 'POST', headers: authHeaders(token) },
@@ -133,6 +133,26 @@ export const publishTask = createServerFn({ method: 'POST' })
 export const cancelTask = createServerFn({ method: 'POST' })
   .validator((data: { token: string; taskId: string }) => data)
   .handler(({ data }) => taskAction(data.token, data.taskId, 'cancel'))
+
+/** 多人任务提前结束：已验收的保留，其余承接者撤销指派，没发出去的稻米退回节点。 */
+export const closeTask = createServerFn({ method: 'POST' })
+  .validator((data: { token: string; taskId: string }) => data)
+  .handler(({ data }) => taskAction(data.token, data.taskId, 'close'))
+
+/** 多人任务撤销一个人的指派：名额让出来，奖励不发。 */
+export const releaseTaskAssignee = createServerFn({ method: 'POST' })
+  .validator((data: { token: string; taskId: string; applicationId: string; reason: string }) => data)
+  .handler(async ({ data }) => {
+    const body = await requestJson<{ data: RiceTask }>(
+      `${BACKEND_BASE}/api/tasks/${data.taskId}/applications/${data.applicationId}/release`,
+      {
+        method: 'POST',
+        headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: data.reason }),
+      },
+    )
+    return body.data
+  })
 
 export const applyForTask = createServerFn({ method: 'POST' })
   .validator((data: { token: string; taskId: string; reason: string; contact: string }) => data)

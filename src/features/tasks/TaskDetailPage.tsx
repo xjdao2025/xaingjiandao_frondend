@@ -21,8 +21,10 @@ import {
   appointTaskApplication,
   approveTaskResult,
   cancelTask,
+  closeTask,
   getTask,
   rejectTaskApplication,
+  releaseTaskAssignee,
   requestTaskChanges,
   submitTaskResult,
 } from './api'
@@ -32,6 +34,7 @@ import {
   taskEventLabel,
   taskApplicationStatusLabel,
   taskDisplayStatus,
+  taskStatusLabel,
   type RiceTask,
   type TaskSubmission,
 } from './types'
@@ -55,6 +58,9 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
   const [busy, setBusy] = useState(false)
   const [applyOpen, setApplyOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [closeOpen, setCloseOpen] = useState(false)
+  const [releaseId, setReleaseId] = useState<string | null>(null)
+  const [releaseReason, setReleaseReason] = useState('')
   const [approveId, setApproveId] = useState<string | null>(null)
   const [rejectId, setRejectId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -96,6 +102,9 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
       setRejectId(null)
       setApplyOpen(false)
       setCancelOpen(false)
+      setCloseOpen(false)
+      setReleaseId(null)
+      setReleaseReason('')
       setReason('')
       setContact('')
       setAppointmentReason('')
@@ -121,6 +130,10 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
   const assignees = task.assignees ?? (task.assignee ? [task.assignee] : [])
   const totalReward = task.total_reward_amount ?? task.reward_amount * capacity
   const recruiting = !task.application_closed && (!task.application_deadline || Date.parse(task.application_deadline) > now) && (task.appointed_count ?? assignees.length) < capacity
+  // 多人任务里承接者看自己这一份的进度，而不是全体汇总出来的任务状态
+  const personal = multiple && task.my_application_status === 'appointed' && task.my_status && task.my_status !== task.status ? task.my_status : null
+  const personalOverdue = personal === 'overdue' || (personal === 'in_progress' && !!task.execution_deadline && Date.parse(task.execution_deadline) <= now)
+  const workers = (task.applications ?? []).filter((item) => item.state === 'appointed' || item.state === 'overdue')
   const visibleEvents = (task.events ?? []).filter((event) => event.to_status !== 'draft')
   const pastRecords = [
     ...(task.past_applications ?? []).map(value => ({ type: 'application' as const, value })),
@@ -132,7 +145,11 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
       <article className="content-card business-panel">
         <header className="task-detail-heading">
           <div>
-            <span className={`task-status status-${expiredOpen ? 'expired' : overdueProgress ? 'overdue' : task.status}`}>{taskDisplayStatus(task, now)}</span>
+            {personal ? (
+              <span className={`task-status status-${personalOverdue ? 'overdue' : personal}`}>我的进度：{personalOverdue ? taskStatusLabel.overdue : taskStatusLabel[personal]}</span>
+            ) : (
+              <span className={`task-status status-${expiredOpen ? 'expired' : overdueProgress ? 'overdue' : task.status}`}>{taskDisplayStatus(task, now)}</span>
+            )}
             <h1>{task.title}</h1>
             <p>{task.node?.name} · {task.creator.nickname || task.creator.handle}发起</p>
             {task.organizer_contact && <p>组织方联系方式：{task.organizer_contact}</p>}
@@ -158,6 +175,8 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
 
         {task.reward_status === 'settled' ? (
           <div className="task-success-note"><CheckCircle2 size={18} /> 稻米激励已发放</div>
+        ) : personal === 'completed' ? (
+          <div className="task-success-note"><CheckCircle2 size={18} /> 你的交付已验收通过，{task.reward_amount > 0 ? `${task.reward_amount} 稻米已发放到你的账户` : '感谢参与'}</div>
         ) : null}
         {task.reward_status === 'refunded' ? (
           <div className="task-neutral-note">稻米激励已退还至{task.funding_node_id ? '节点' : '发布者'}账户。</div>
@@ -167,11 +186,12 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
           <div className="task-neutral-note">申请截止：{formatTimestamp(task.application_deadline)}</div>
         ) : null}
         {task.execution_deadline && <div className="task-neutral-note">最晚交成果：{formatTimestamp(task.execution_deadline)}</div>}
-        {(task.status === 'overdue' || overdueProgress) && <div className="task-warning-note"><CircleAlert size={18} /><div><strong>已过交成果的时间</strong><p>请联系发起人，商量后续安排。</p><Link to="/profile/$actor" params={{ actor: task.creator.did }}>查看发起人主页</Link></div></div>}
+        {(personal ? personalOverdue : task.status === 'overdue' || overdueProgress) && <div className="task-warning-note"><CircleAlert size={18} /><div><strong>已过交成果的时间</strong><p>请联系发起人，商量后续安排。</p><Link to="/profile/$actor" params={{ actor: task.creator.did }}>查看发起人主页</Link></div></div>}
 
-        {task.status === 'completed' ? (
+        {task.status === 'completed' && !personal ? (
           <div className="task-success-note"><CheckCircle2 size={18} /> 验收通过</div>
         ) : null}
+        {personal === 'under_review' ? <div className="task-neutral-note">你的成果已提交，等发起人验收。</div> : null}
         {task.status === 'draft' ? <div className="task-neutral-note">草稿仅你可见，发布后才进入任务列表。</div> : null}
         {(task.status === 'expired' || expiredOpen) ? <div className="task-neutral-note">该任务已失效。</div> : null}
         {latestRejected && actions.has('submit_result') ? <ChangesRequested submission={latestRejected} /> : null}
@@ -220,6 +240,9 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
         ) : null}
         {task.my_application_status === 'not_selected' ? (
           <div className="task-neutral-note">本次申请未入选。</div>
+        ) : null}
+        {task.my_application_status === 'released' ? (
+          <div className="task-neutral-note">发起人撤销了对你的指派，本次不再参与交付。</div>
         ) : null}
         {task.my_application_status === 'cancelled' ? (
           <div className="task-neutral-note">你申请过该任务；任务现已取消。</div>
@@ -271,6 +294,58 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
                 </article>
               ))}
             </div>
+          </section>
+        ) : null}
+
+        {actions.has('release_assignee') && token && workers.length > 0 ? (
+          <section className="task-action-section">
+            <h2>承接中</h2>
+            <div className="applicant-list">
+              {workers.map((application) => (
+                <article key={application.id}>
+                  <strong>{application.user.nickname || application.user.handle}</strong>
+                  {application.contact && <p>联系方式：{application.contact}</p>}
+                  {releaseId === application.id ? (
+                    <>
+                      <TextArea
+                        label="撤销说明"
+                        value={releaseReason}
+                        onChange={setReleaseReason}
+                        maxLength={512}
+                        width="100%"
+                        isOptional
+                      />
+                      <div className="form-actions">
+                        <Button label="保留" variant="secondary" isDisabled={busy} onClick={() => { setReleaseId(null); setReleaseReason('') }} />
+                        <Button
+                          label="确认撤销指派"
+                          variant="destructive"
+                          isDisabled={busy}
+                          clickAction={() => run(() => releaseTaskAssignee({
+                            data: { token, taskId, applicationId: application.id, reason: releaseReason },
+                          }))}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="form-actions">
+                      <Button label="撤销指派" variant="secondary" isDisabled={busy} onClick={() => { setReleaseId(application.id); setReleaseReason('') }} />
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {actions.has('close') && token ? (
+          <section className="task-action-section">
+            <Button label="提前结束任务" variant="destructive" onClick={() => setCloseOpen(true)} />
+            {closeOpen && <DetailDialog title="确认提前结束" className="post-dialog business-dialog compose-close-dialog" onClose={() => { if (!busy) setCloseOpen(false) }}><div className="business-panel form-stack">
+              <p>已验收通过的交付保留；还在承接的伙伴会被撤销指派，等待中的申请落选，没发出去的稻米退回节点账户。结束后不能再申请或指派。</p>
+              {error && <p className="inline-error" role="alert">{error}</p>}
+              <div className="form-actions"><Button label="继续任务" variant="secondary" isDisabled={busy} onClick={() => setCloseOpen(false)} /><Button label="确认结束" variant="destructive" isDisabled={busy} clickAction={() => run(() => closeTask({ data: { token, taskId } }))} /></div>
+            </div></DetailDialog>}
           </section>
         ) : null}
 

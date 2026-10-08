@@ -17,7 +17,9 @@ export type TaskApplication = {
   round?: number
   reason: string
   contact?: string | null
-  status: 'pending' | 'appointed' | 'not_selected' | 'cancelled' | 'expired'
+  status: 'pending' | 'appointed' | 'released' | 'not_selected' | 'cancelled' | 'expired'
+  /** 申请状态机的细粒度状态；`status` 是老的粗粒度口径（被指派后统称 appointed）。 */
+  state?: 'pending' | 'appointed' | 'overdue' | 'under_review' | 'completed' | 'released' | 'rejected' | 'not_selected' | 'cancelled' | 'expired'
   user: RicePublicUser
   inserted_at: string
 }
@@ -83,6 +85,8 @@ export type RiceTask = {
     | 'submit_result'
     | 'approve_result'
     | 'request_changes'
+    | 'release_assignee'
+    | 'close'
     | 'edit'
   >
   applications: TaskApplication[] | null
@@ -127,6 +131,7 @@ export function taskDisplayStatus(task: Pick<RiceTask, 'status' | 'application_c
 export const taskApplicationStatusLabel: Record<TaskApplication['status'], string> = {
   pending: '申请中',
   appointed: '已入选',
+  released: '已撤销指派',
   not_selected: '未入选',
   cancelled: '任务已取消',
   expired: '任务已失效',
@@ -149,7 +154,7 @@ export function taskEventLabel(event: TaskEvent) {
 
 export type TaskGroup = TaskStatus | 'applying' | 'not_selected'
 export function myTaskGroup(task: RiceTask, isPublisher: boolean, now = Date.now()): TaskGroup {
-  if (!isPublisher && task.my_application_status === 'not_selected') return 'not_selected'
+  if (!isPublisher && (task.my_application_status === 'not_selected' || task.my_application_status === 'released')) return 'not_selected'
   if (!isPublisher && task.my_application_status === 'appointed' && task.my_status) task = { ...task, status: task.my_status }
   if (pastTaskApplicationDeadline(task, now)) return 'expired'
   if (!isPublisher && task.my_application_status === 'pending' && !['completed', 'expired', 'cancelled'].includes(task.status)) return 'applying'

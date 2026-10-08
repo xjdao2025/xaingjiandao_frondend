@@ -32,6 +32,7 @@ const reasonCopy: Record<string, { label: string; action: string }> = {
   'subscribed-post': { label: '帖子', action: '发布了新帖子' },
   'task-application_created': { label: '任务', action: '申请了你发起的任务' },
   'task-assignee_appointed': { label: '任务', action: '选定你来完成任务' },
+  'task-appointment_released': { label: '任务', action: '撤销了对你的任务指派' },
   'task-application_not_selected': { label: '任务', action: '通知你：本次任务申请未入选' },
   'task-application_rejected': { label: '任务', action: '拒绝了你的任务申请，本次申请未入选' },
   'task-task_cancelled': { label: '任务', action: '取消了你申请的任务' },
