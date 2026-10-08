@@ -9,6 +9,7 @@ import { useStoredSession } from '~/features/session/session'
 import { PasswordInput } from '~/components/PasswordInput'
 import { loginReturnTo } from './login-redirect'
 import { useAuthOptions } from './useAuthOptions'
+import { errorMessage } from '~/lib/util'
 
 export function LoginPage({ returnTo }: { returnTo?: string }) {
   const [identifier, setIdentifier] = useState('')
@@ -37,7 +38,7 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
       saveSession(session)
       await navigate({ href: destination, replace: true })
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '登录失败')
+      setError(errorMessage(reason, '登录失败'))
     }
   }
 
@@ -63,23 +64,10 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
           width="100%"
           hasAutoFocus
         />
-        <PasswordInput
-          ref={passwordInput}
-          label="密码"
-          value={password}
-          onChange={setPassword}
-          placeholder="输入密码"
-          width="100%"
-          onEnter={submit}
-        />
+        <PasswordInput ref={passwordInput} label="密码" value={password} onChange={setPassword} placeholder="输入密码" width="100%" onEnter={submit} />
         {error ? <div className="form-error">{error}</div> : null}
         <div className="form-actions">
-          <Button
-            label="登录"
-            variant="primary"
-            size="lg"
-            clickAction={submit}
-          />
+          <Button label="登录" variant="primary" size="lg" clickAction={submit} />
         </div>
         {options?.semi_enabled ? <div className="form-actions">
           <Button label="使用 Semi 登录" variant="secondary" size="lg"

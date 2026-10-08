@@ -4,6 +4,7 @@ import { KeyRound } from 'lucide-react'
 import { useState } from 'react'
 
 import { resetRicePassword, type VerificationChannel } from './api'
+import { useAsyncAction } from './useAsyncAction'
 import { VerificationFields } from './VerificationFields'
 import { PasswordInput } from '~/components/PasswordInput'
 
@@ -12,30 +13,16 @@ export function ForgotPasswordPage() {
   const [contact, setContact] = useState('')
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const { error, setError, busy, run } = useAsyncAction()
   const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
 
-  const submit = async () => {
-    setBusy(true)
-    setError('')
-    try {
-      await resetRicePassword({
-        data: {
-          channel,
-          code,
-          password,
-          ...(channel === 'sms' ? { phone: contact, phoneRegion: '86' } : { email: contact }),
-        },
-      })
-      await navigate({ to: '/login' })
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '密码重置失败')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const submit = () => run('密码重置失败', async () => {
+    await resetRicePassword({
+      data: { channel, code, password, ...(channel === 'sms' ? { phone: contact, phoneRegion: '86' } : { email: contact }) },
+    })
+    await navigate({ to: '/login' })
+  })
 
   return (
     <div className="page narrow-page account-entry-page">
@@ -58,25 +45,11 @@ export function ForgotPasswordPage() {
           onError={setError}
           onSent={() => setNotice('验证码已发送，请检查短信或邮箱。')}
         />
-        <PasswordInput
-          label="新密码"
-          value={password}
-          onChange={setPassword}
-          description="至少 8 位"
-          width="100%"
-          isDisabled={busy}
-        />
+        <PasswordInput label="新密码" value={password} onChange={setPassword} description="至少 8 位" width="100%" isDisabled={busy} />
         {notice ? <div className="form-notice">{notice}</div> : null}
         {error ? <div className="form-error" role="alert">{error}</div> : null}
         <div className="form-actions">
-          <Button
-            label="重置密码"
-            variant="primary"
-            size="lg"
-            clickAction={submit}
-            isLoading={busy}
-            isDisabled={!contact.trim() || !code.trim() || password.length < 8}
-          />
+          <Button label="重置密码" variant="primary" size="lg" clickAction={submit} isLoading={busy} isDisabled={!contact.trim() || !code.trim() || password.length < 8} />
         </div>
       </section>
     </div>

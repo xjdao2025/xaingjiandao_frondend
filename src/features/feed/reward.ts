@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { BACKEND_BASE, requestJson } from '~/lib/http'
+import { backendData } from '~/lib/http'
 import type { RicePublicUser } from '~/lib/models'
 
 type PostRewardInput = { token: string; to: string; amount: number; subjectUri: string; clientRequestId: string }
@@ -10,11 +10,10 @@ export async function requestPostReward(data: PostRewardInput) {
   if (!data.to.trim() || !data.subjectUri.startsWith('at://') || !Number.isSafeInteger(data.amount) || data.amount < 1) {
     throw new Error('请选择帖子作者并输入正整数稻米数量。')
   }
-  const result = (await requestJson<{ data: PostReward }>(`${BACKEND_BASE}/api/grain_transfers`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to: data.to.trim(), amount: data.amount, kind: 'reward', subject_uri: data.subjectUri, client_request_id: data.clientRequestId }),
-  })).data
+  const result = await backendData<PostReward>('/api/grain_transfers', {
+    method: 'POST', token: data.token,
+    json: { to: data.to.trim(), amount: data.amount, kind: 'reward', subject_uri: data.subjectUri, client_request_id: data.clientRequestId },
+  })
   if (!result?.id || result.amount !== data.amount || !result.to?.id) {
     throw new Error('赞赏结果尚未确认，请先查看稻米明细。')
   }

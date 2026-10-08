@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { BACKEND_BASE, readJson, requestJson } from '~/lib/http'
+import { backend, BACKEND_BASE, readJson, searchParams, withQuery } from '~/lib/http'
+import { pdsGet } from '~/lib/pds'
 import type { NotificationView } from '~/lib/models'
 
 export const NOTIFICATIONS_READ_EVENT = 'xiangjian-notifications-read'
@@ -56,39 +57,26 @@ export function normalizeNotifications(payload: unknown): NotificationView[] {
       subjectId?: unknown
     }>
   }
+  const str = (value: unknown) => typeof value === 'string' ? value : undefined
+  // Optional keys stay absent (not undefined) when the payload lacks them.
+  const optional = <K extends string>(key: K, value: unknown) =>
+    typeof value === 'string' ? { [key]: value } as Record<K, string> : {}
   return (Array.isArray(body.notifications) ? body.notifications : [])
     .flatMap((notification): NotificationView[] => {
       if (notification == null || typeof notification.uri !== 'string' || typeof notification.author?.handle !== 'string') return []
+      const { record } = notification
       return [{
         uri: notification.uri,
-        author: {
-          ...(typeof notification.author?.did === 'string' ? { did: notification.author.did } : {}),
-          handle: notification.author.handle,
-          displayName:
-            typeof notification.author?.displayName === 'string'
-              ? notification.author.displayName
-              : undefined,
-        },
-        reason:
-          typeof notification.reason === 'string'
-            ? notification.reason
-            : 'unknown',
-        ...(typeof notification.reasonSubject === 'string' ? { reasonSubject: notification.reasonSubject } : {}),
-        ...(typeof notification.record?.subject?.uri === 'string' ? { recordSubjectUri: notification.record.subject.uri } : {}),
-        text:
-          typeof notification.record?.text === 'string'
-            ? notification.record.text
-            : '',
+        author: { ...optional('did', notification.author.did), handle: notification.author.handle, displayName: str(notification.author.displayName) },
+        reason: str(notification.reason) ?? 'unknown',
+        ...optional('reasonSubject', notification.reasonSubject),
+        ...optional('recordSubjectUri', record?.subject?.uri),
+        text: str(record?.text) ?? '',
         isRead: notification.isRead === true,
-        indexedAt:
-          typeof notification.indexedAt === 'string'
-            ? notification.indexedAt
-            : new Date(0).toISOString(),
-        ...(typeof notification.subjectType === 'string' ? { subjectType: notification.subjectType } : {}),
-        ...(typeof notification.subjectId === 'string' ? { subjectId: notification.subjectId } : {}),
-        ...(typeof notification.taskId === 'string'
-          ? { taskId: notification.taskId }
-          : {}),
+        indexedAt: str(notification.indexedAt) ?? new Date(0).toISOString(),
+        ...optional('subjectType', notification.subjectType),
+        ...optional('subjectId', notification.subjectId),
+        ...optional('taskId', notification.taskId),
       }]
     })
 }
@@ -104,22 +92,11 @@ export function normalizeNotificationPage(payload: unknown): NotificationPage {
 
 type NotificationPageInput = { token: string; cursor?: string }
 export async function loadSocialNotificationPage({ token, cursor }: NotificationPageInput): Promise<NotificationPage> {
-  const params = new URLSearchParams({ limit: '30' })
-  if (cursor) params.set('cursor', cursor)
-  const body = await requestJson<unknown>(
-    `${BACKEND_BASE}/pds/xrpc/app.bsky.notification.listNotifications?${params}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
-  return normalizeNotificationPage(body)
+  return normalizeNotificationPage(await pdsGet<unknown>('app.bsky.notification.listNotifications', searchParams({ limit: '30', cursor }), token))
 }
 
 export async function loadBusinessNotificationPage({ token, cursor }: NotificationPageInput): Promise<NotificationPage> {
-  const params = new URLSearchParams()
-  if (cursor) params.set('before', cursor)
-  const body = await requestJson<unknown>(`${BACKEND_BASE}/api/notifications${params.size ? `?${params}` : ''}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  return normalizeNotificationPage(body)
+  return normalizeNotificationPage(await backend<unknown>(withQuery('/api/notifications', { before: cursor }), { token }))
 }
 
 export const getNotifications = createServerFn({ method: 'POST' })
@@ -133,10 +110,7 @@ export const getTaskNotifications = createServerFn({ method: 'POST' })
 export async function updateSeenNotifications(accessJwt: string) {
   const response = await fetch(`${BACKEND_BASE}/pds/xrpc/app.bsky.notification.updateSeen`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessJwt}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${accessJwt}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ seenAt: new Date().toISOString() }),
   })
   // updateSeen has no output schema and returns an empty HTTP 200 on success.
@@ -150,8 +124,5 @@ export const markNotificationsRead = createServerFn({ method: 'POST' })
 export const markTaskNotificationsRead = createServerFn({ method: 'POST' })
   .validator((token: string) => token)
   .handler(async ({ data: token }) => {
-    await requestJson(`${BACKEND_BASE}/api/notifications/read`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    await backend('/api/notifications/read', { method: 'POST', token })
   })

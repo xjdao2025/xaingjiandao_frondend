@@ -1,4 +1,4 @@
-import { LoginLink } from '../session/LoginLink'
+import { SignedOutState } from '../session/LoginLink'
 import { Button } from '@astryxdesign/core/Button'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronRight, LogOut } from 'lucide-react'
@@ -11,12 +11,7 @@ export function SettingsPage() {
   const navigate = useNavigate()
 
   if (!session) {
-    return (
-      <div className="page signed-out-state">
-        <strong>登录后管理账号</strong>
-        <LoginLink className="primary-link">前往登录</LoginLink>
-      </div>
-    )
+    return <SignedOutState title="登录后管理账号" />
   }
 
   const logout = async () => {

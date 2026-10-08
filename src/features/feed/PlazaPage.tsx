@@ -12,6 +12,7 @@ import { useStoredSession } from '../session/session'
 import { getPosts, readCachedFeed, writeCachedFeed } from './api'
 import { bannerHref, type Banner } from './banners'
 import { postCategory } from './tags'
+import { errorMessage, mergeBy } from '~/lib/util'
 
 const BANNER_ROTATION_MS = 6_000
 
@@ -50,14 +51,10 @@ function PlazaBanner({ banners }: { banners: Banner[] }) {
   </div>
 }
 
-
 export function PlazaPage({ initialFeed, banners }: { initialFeed: PostFeed; banners: Banner[] }) {
   const { session } = useStoredSession()
   const did = session?.pds.did
-  const scopedFeed = useMemo(() => readCachedFeed(did) ?? {
-    ...initialFeed,
-    posts: initialFeed.posts.map(({ viewer: _viewer, ...post }) => post),
-  }, [did, initialFeed])
+  const scopedFeed = useMemo(() => readCachedFeed(did) ?? { ...initialFeed, posts: initialFeed.posts.map(({ viewer: _viewer, ...post }) => post) }, [did, initialFeed])
   return <PlazaFeed key={did ?? 'guest'} initialFeed={scopedFeed} banners={banners} />
 }
 
@@ -85,46 +82,29 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
   useEffect(() => {
     request.current++
     if (!isReady) return
-    if (reloadKey === 0) {
-      const cachedFeed = readCachedFeed(did)
-      if (cachedFeed) {
-        setLoading(false)
-        setError('')
-        setFeed(cachedFeed)
-        return () => { request.current++ }
-      }
-      if (!did) {
-        setLoading(false)
-        setError('')
-        writeCachedFeed(initialFeed)
-        setFeed(initialFeed)
-        return () => { request.current++ }
-      }
+    const cachedFeed = reloadKey === 0 ? readCachedFeed(did) : null
+    if (reloadKey === 0 && (cachedFeed || !did)) {
+      // Guests start from the server-rendered feed, which becomes their cache.
+      setLoading(false)
+      setError('')
+      if (!cachedFeed) writeCachedFeed(initialFeed)
+      setFeed(cachedFeed ?? initialFeed)
+      return () => { request.current++ }
     }
 
-    let active = true
+    // The cleanup bumps the request counter, so it alone marks stale responses.
     const current = request.current
     setLoading(true)
     setError('')
-    void getPosts({
-      data: {
-        accessJwt,
-        did,
-        category: 'post',
-      },
-    })
+    void getPosts({ data: { accessJwt, did, category: 'post' } })
       .then((nextFeed) => {
-        if (!active || current !== request.current) return
+        if (current !== request.current) return
         writeCachedFeed(nextFeed, did)
         setFeed(nextFeed)
       })
-      .catch((reason) => {
-        if (active && current === request.current) setError(reason instanceof Error ? reason.message : '帖子暂时无法加载')
-      })
-      .finally(() => {
-        if (active && current === request.current) setLoading(false)
-      })
-    return () => { active = false; request.current++ }
+      .catch((reason) => { if (current === request.current) setError(errorMessage(reason, '帖子暂时无法加载')) })
+      .finally(() => { if (current === request.current) setLoading(false) })
+    return () => { request.current++ }
   }, [accessJwt, did, initialFeed, isReady, reloadKey])
 
   const more = async () => {
@@ -135,11 +115,11 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
     try {
       const page = await getPosts({ data: { accessJwt, did, category: 'post', cursor: feed.cursor } })
       if (current !== request.current) return
-      const next = { ...page, posts: [...new Map([...feed.posts, ...page.posts].map((post) => [post.reason?.uri ?? post.uri, post])).values()] }
+      const next = { ...page, posts: mergeBy([...feed.posts, ...page.posts], (post) => post.reason?.uri ?? post.uri) }
       setFeed(next)
       writeCachedFeed(next, did)
     } catch (reason) {
-      if (current === request.current) setError(reason instanceof Error ? reason.message : '帖子暂时无法加载')
+      if (current === request.current) setError(errorMessage(reason, '帖子暂时无法加载'))
     } finally { if (current === request.current) setLoading(false) }
   }
 
@@ -149,26 +129,14 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
       const { reason: _previousReason, ...basePost } = post
       const viewer = { ...basePost.viewer, repost: reason?.uri }
       const remaining = current.posts
-        .filter(
-          (item) =>
-            !(item.uri === post.uri && item.reason?.by.did === did),
-        )
-        .map((item) =>
-          item.uri === post.uri ? { ...item, viewer } : item,
-        )
-      const posts = reason
-        ? [{ ...basePost, viewer, reason }, ...remaining]
-        : remaining
-      return { ...current, posts }
+        .filter((item) => !(item.uri === post.uri && item.reason?.by.did === did))
+        .map((item) => item.uri === post.uri ? { ...item, viewer } : item)
+      return { ...current, posts: reason ? [{ ...basePost, viewer, reason }, ...remaining] : remaining }
     })
   }
 
-  const handlePostDeleted = (postUri: string) => {
-    setFeed((current) => ({
-      ...current,
-      posts: current.posts.filter((post) => post.uri !== postUri),
-    }))
-  }
+  const handlePostDeleted = (postUri: string) =>
+    setFeed((current) => ({ ...current, posts: current.posts.filter((post) => post.uri !== postUri) }))
 
   return (
     <div className="page plaza-page">
@@ -181,11 +149,7 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
       ) : null}
 
       <section className="feed-section">
-        <PostList
-          posts={feed.posts.filter((post) => postCategory(post.record) === 'post')}
-          onRepostChange={handleRepostChange}
-          onPostDeleted={handlePostDeleted}
-        />
+        <PostList posts={feed.posts.filter((post) => postCategory(post.record) === 'post')} onRepostChange={handleRepostChange} onPostDeleted={handlePostDeleted} />
         {feed.cursor && <AutoLoadMore key={did ?? 'guest'} cursor={feed.cursor} loading={isLoading || !isReady} failed={!!error} onLoadMore={more} />}
       </section>
 

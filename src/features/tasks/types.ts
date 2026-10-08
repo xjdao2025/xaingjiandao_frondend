@@ -1,14 +1,6 @@
 import type { RicePublicUser, RiceAttachment, HistorySnapshot } from '~/lib/models'
 
-export type TaskStatus =
-  | 'draft'
-  | 'open'
-  | 'in_progress'
-  | 'overdue'
-  | 'under_review'
-  | 'completed'
-  | 'expired'
-  | 'cancelled'
+export type TaskStatus = 'draft' | 'open' | 'in_progress' | 'overdue' | 'under_review' | 'completed' | 'expired' | 'cancelled'
 export type TaskListStatus = TaskStatus | 'closed'
 export type TaskMine = 'assigned' | 'created' | 'applied' | 'managed'
 
@@ -77,17 +69,7 @@ export type RiceTask = {
   my_application_status: TaskApplication['status'] | null
   my_application?: TaskApplication | null
   allowed_actions: Array<
-    | 'publish'
-    | 'apply'
-    | 'appoint'
-    | 'reject_application'
-    | 'cancel'
-    | 'submit_result'
-    | 'approve_result'
-    | 'request_changes'
-    | 'release_assignee'
-    | 'close'
-    | 'edit'
+    'publish' | 'apply' | 'appoint' | 'reject_application' | 'cancel' | 'submit_result' | 'approve_result' | 'request_changes' | 'release_assignee' | 'close' | 'edit'
   >
   applications: TaskApplication[] | null
   past_applications?: TaskApplication[] | null
@@ -100,14 +82,7 @@ export type RiceTask = {
 }
 
 export const taskStatusLabel: Record<TaskStatus, string> = {
-  draft: '草稿',
-  open: '招募中',
-  in_progress: '进行中',
-  overdue: '已超时',
-  under_review: '待验收',
-  completed: '已完成',
-  expired: '已失效',
-  cancelled: '已取消',
+  draft: '草稿', open: '招募中', in_progress: '进行中', overdue: '已超时', under_review: '待验收', completed: '已完成', expired: '已失效', cancelled: '已取消',
 }
 
 type DeadlineTask = Pick<RiceTask, 'status' | 'application_deadline'> & Partial<Pick<RiceTask, 'appointed_count' | 'assignees' | 'assignee'>>
@@ -129,12 +104,7 @@ export function taskDisplayStatus(task: Pick<RiceTask, 'status' | 'application_c
 }
 
 export const taskApplicationStatusLabel: Record<TaskApplication['status'], string> = {
-  pending: '申请中',
-  appointed: '已入选',
-  released: '已撤销指派',
-  not_selected: '未入选',
-  cancelled: '任务已取消',
-  expired: '任务已失效',
+  pending: '申请中', appointed: '已入选', released: '已撤销指派', not_selected: '未入选', cancelled: '任务已取消', expired: '任务已失效',
 }
 
 export function taskEventLabel(event: TaskEvent) {

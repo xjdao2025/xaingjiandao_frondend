@@ -1,5 +1,6 @@
 import type { NotificationView } from '~/lib/models'
 import { NOTIFICATIONS_READ_EVENT } from './api'
+import { mergeBy } from '~/lib/util'
 
 type LocalState = Record<string, 'read' | 'hidden'>
 export const NOTIFICATION_STORAGE_PREFIX = 'xiangjian-notifications:'
@@ -13,7 +14,7 @@ function notificationKey(notification: NotificationView) {
 }
 
 export function mergeNotificationRows(current: NotificationView[], next: NotificationView[]) {
-  return [...new Map([...current, ...next].map((notification) => [notificationKey(notification), notification])).values()]
+  return mergeBy([...current, ...next], (notification) => notificationKey(notification))
     .sort((a, b) => b.indexedAt.localeCompare(a.indexedAt))
 }
 

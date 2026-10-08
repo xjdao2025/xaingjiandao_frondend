@@ -13,6 +13,7 @@ import { useStoredSession } from '../session/session'
 import { getSocialProfile, toggleFollow } from './api'
 import { PublicProfileContent } from './PublicProfileContent'
 import { PersonalGrainActions } from '../grains/PersonalGrainActions'
+import { errorMessage } from '~/lib/util'
 
 type UserProfileProps = { actor: string; initialSend?: boolean }
 
@@ -38,7 +39,7 @@ function UserProfileContent({ actor, initialSend = false }: UserProfileProps) {
     })
       .then((nextProfile) => { if (active) setProfile(nextProfile) })
       .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : '用户主页暂时无法显示')
+        if (active) setError(errorMessage(reason, '用户主页暂时无法显示'))
       })
     return () => { active = false }
   }, [actor, session?.pds.access_jwt])
@@ -71,13 +72,10 @@ function UserProfileContent({ actor, initialSend = false }: UserProfileProps) {
       setProfile((current) => current ? {
         ...current,
         followersCount: Math.max(0, current.followersCount + (recordUri ? 1 : -1)),
-        viewer: {
-          ...current.viewer,
-          ...(recordUri ? { following: recordUri } : { following: undefined }),
-        },
+        viewer: { ...current.viewer, following: recordUri ?? undefined },
       } : current)
     } catch (reason) {
-      setFollowError(reason instanceof Error ? reason.message : '关注状态更新失败')
+      setFollowError(errorMessage(reason, '关注状态更新失败'))
     } finally {
       setFollowing(false)
     }
@@ -90,12 +88,7 @@ function UserProfileContent({ actor, initialSend = false }: UserProfileProps) {
         <>
           <section className="social-profile-card">
             {ownProfile ? (
-              <Link
-                to="/me/settings/profile"
-                className="profile-edit-link"
-                aria-label="编辑资料"
-                title="编辑资料"
-              >
+              <Link to="/me/settings/profile" className="profile-edit-link" aria-label="编辑资料" title="编辑资料">
                 <Pencil size={20} aria-hidden="true" />
               </Link>
             ) : null}

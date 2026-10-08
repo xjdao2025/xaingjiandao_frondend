@@ -1,4 +1,4 @@
-import { BACKEND_BASE, requestJson, type JsonObject } from './http'
+import { backend, type BackendInit, type JsonObject } from './http'
 import { IMAGE_TYPES, MAX_IMAGE_COUNT } from './images'
 import type { PdsImage } from './models'
 
@@ -15,10 +15,9 @@ export async function uploadPdsImage(accessJwt: string, base64: string, contentT
   }
   const bytes = Buffer.from(base64, 'base64')
   if (!bytes.length || bytes.length > MAX_POST_IMAGE_BYTES) throw new Error('帖子图片每张不能超过 1 MB。')
-  const { blob } = await requestJson<{ blob: PdsImage['image'] }>(
-    `${BACKEND_BASE}/pds/xrpc/com.atproto.repo.uploadBlob`,
-    { method: 'POST', headers: { Authorization: `Bearer ${accessJwt}`, 'Content-Type': contentType }, body: bytes },
-  )
+  const { blob } = await backend<{ blob: PdsImage['image'] }>('/pds/xrpc/com.atproto.repo.uploadBlob', {
+    method: 'POST', token: accessJwt, headers: { 'Content-Type': contentType }, body: bytes,
+  })
   if (blob?.$type !== 'blob' || !blob.ref?.$link || !POST_IMAGE_TYPES.includes(blob.mimeType) || !Number.isFinite(blob.size) || blob.size <= 0 || blob.size > MAX_POST_IMAGE_BYTES) {
     throw new Error('图片上传失败，请重试。')
   }
@@ -57,36 +56,30 @@ export function recordKeyFromUri(uri: string, collection: string) {
   return recordKey
 }
 
+/** GET an XRPC method: signed-in readers use their PDS, guests the public AppView. */
+export function xrpcGet<T>(method: string, params: URLSearchParams, accessJwt?: string) {
+  return backend<T>(`/${accessJwt ? 'pds' : 'bsky'}/xrpc/${method}?${params}`, { token: accessJwt })
+}
+
+export function pdsGet<T>(method: string, params: URLSearchParams | string, accessJwt: string) {
+  return backend<T>(`/pds/xrpc/${method}?${params}`, { token: accessJwt })
+}
+
+export function pdsPost<T = JsonObject>(method: string, accessJwt: string, init?: BackendInit) {
+  return backend<T>(`/pds/xrpc/${method}`, { method: 'POST', token: accessJwt, ...init })
+}
+
 export function createPdsRecord(
   accessJwt: string,
   body: { repo: string; collection: string; record: JsonObject; rkey?: string },
 ) {
-  return requestJson<{ uri: string; cid: string }>(
-    `${BACKEND_BASE}/pds/xrpc/com.atproto.repo.createRecord`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessJwt}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    },
-  )
+  return pdsPost<{ uri: string; cid: string }>('com.atproto.repo.createRecord', accessJwt, { json: body })
 }
 
-export async function deletePdsRecord(
-  accessJwt: string,
-  body: { repo: string; collection: string; rkey: string },
-) {
-  await requestJson(
-    `${BACKEND_BASE}/pds/xrpc/com.atproto.repo.deleteRecord`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessJwt}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    },
-  )
+export async function deletePdsRecord(accessJwt: string, body: { repo: string; collection: string; rkey: string }) {
+  await pdsPost('com.atproto.repo.deleteRecord', accessJwt, { json: body })
+}
+
+export function deleteOwnRecord(accessJwt: string, did: string, collection: string, uri: string) {
+  return deletePdsRecord(accessJwt, { repo: did, collection, rkey: recordKeyFromUri(uri, collection) })
 }

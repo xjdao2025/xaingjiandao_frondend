@@ -7,12 +7,8 @@ import { useState } from 'react'
 import { useStoredSession } from '../session/session'
 import { loginReturnTo } from '../session/login-redirect'
 import { useAuthOptions } from '../session/useAuthOptions'
-import {
-  registerRice,
-  registrationUsernameError,
-  verifyRegistration,
-  type VerificationChannel,
-} from './api'
+import { registerRice, registrationUsernameError, verifyRegistration, type VerificationChannel } from './api'
+import { useAsyncAction } from './useAsyncAction'
 import { VerificationFields } from './VerificationFields'
 import { ProfileEditPage } from './ProfileEditPage'
 import { PasswordInput } from '~/components/PasswordInput'
@@ -25,9 +21,8 @@ export function RegisterPage({ returnTo }: { returnTo?: string }) {
   const [username, setUsername] = useState('')
   const [step, setStep] = useState<'credentials' | 'username'>('credentials')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const { error, setError, busy, run } = useAsyncAction()
   const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
   const { session, saveSession } = useStoredSession()
   const navigate = useNavigate()
   const { options, error: optionsError } = useAuthOptions()
@@ -36,38 +31,21 @@ export function RegisterPage({ returnTo }: { returnTo?: string }) {
 
   const verify = async () => {
     if (busy || password.length < 8) return
-    setBusy(true)
-    setError('')
-    try {
+    await run('验证码校验失败', async () => {
       const result = await verifyRegistration({
-        data: {
-          channel: selectedChannel,
-          code,
-          ...(selectedChannel === 'sms' ? { phone: contact, phoneRegion: '86' } : { email: contact }),
-        },
+        data: { channel: selectedChannel, code, ...(selectedChannel === 'sms' ? { phone: contact, phoneRegion: '86' } : { email: contact }) },
       })
       setTicket(result.ticket)
       setStep('username')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '验证码校验失败')
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const register = async () => {
     if (busy || !options?.handle_domain || registrationUsernameError(username)) return
-    setBusy(true)
-    setError('')
-    try {
-      const session = await registerRice({ data: { ticket, username, password } })
-      saveSession(session)
+    await run('注册失败', async () => {
+      saveSession(await registerRice({ data: { ticket, username, password } }))
       setPassword('')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '注册失败')
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const finish = () => navigate({ href: loginReturnTo(returnTo), replace: true })
@@ -101,15 +79,7 @@ export function RegisterPage({ returnTo }: { returnTo?: string }) {
               onError={setError}
               onSent={() => setNotice(options?.verification_mode === 'log' ? '测试验证码已写入服务器日志。' : `验证码已发送，请检查${selectedChannel === 'email' ? '邮箱' : '短信'}。`)}
             />
-            <PasswordInput
-              label="密码"
-              value={password}
-              onChange={setPassword}
-              description="至少 8 位。"
-              width="100%"
-              isDisabled={busy}
-              isRequired
-            />
+            <PasswordInput label="密码" value={password} onChange={setPassword} description="至少 8 位。" width="100%" isDisabled={busy} isRequired />
             {notice ? <div className="form-notice">{notice}</div> : null}
             <div className="form-actions">
               <Button

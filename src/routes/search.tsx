@@ -17,6 +17,7 @@ import { getTaskPage } from '~/features/tasks/api'
 import { TaskCard } from '~/features/tasks/TaskCard'
 import type { RiceTask } from '~/features/tasks/types'
 import type { PostView, RicePublicUser, RiceSession } from '~/lib/models'
+import { errorMessage } from '~/lib/util'
 
 export const Route = createFileRoute('/search')({ validateSearch: (search: Record<string, unknown>): { q?: string } => typeof search.q === 'string' && search.q.trim() ? { q: search.q.trim() } : {}, component: SearchPage })
 function SearchPage() {
@@ -70,7 +71,7 @@ function SearchResults({ q, session }: { q?: string; session: RiceSession | null
       else if (kind === 'events') { const page = await getEvents({ data: { q: searched, token: session?.token, before: cursors.events } }); if (current === version.current) { setEvents((r) => [...r, ...page.data]); setCursors((c) => ({ ...c, events: page.meta?.next_cursor ?? undefined })) } }
       else if (kind === 'users') { const page = await searchUsers({ data: { q: searched, before: cursors.users } }); if (current === version.current) { setUsers((r) => [...r, ...page.data]); setCursors((c) => ({ ...c, users: page.meta.next_cursor ?? undefined })) } }
       else { const page = await getPosts({ data: { query: searched, accessJwt: session?.pds.access_jwt, did: session?.pds.did, cursor: cursors.posts, limit: 10, category: 'post' } }); if (current === version.current) { setPosts((r) => [...r, ...page.posts]); setCursors((c) => ({ ...c, posts: page.cursor ?? undefined })) } }
-    } catch (e) { if (current === version.current) setError(e instanceof Error ? e.message : '加载失败') } finally { if (current === version.current) setLoading(false) }
+    } catch (e) { if (current === version.current) setError(errorMessage(e, '加载失败')) } finally { if (current === version.current) setLoading(false) }
   }
   const emptyMessage = (title: string) => failedGroups.includes(title) ? '暂时无法加载，请重试。' : loading ? '' : `没有相关${title}`
   const hasResults = posts.length + tasks.length + events.length + nodes.length + users.length > 0

@@ -1,4 +1,4 @@
-import { LoginLink } from '../session/LoginLink'
+import { SignedOutState } from '../session/LoginLink'
 import { Button } from '@astryxdesign/core/Button'
 import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
@@ -7,19 +7,15 @@ import { CircleAlert } from 'lucide-react'
 import { useState } from 'react'
 
 import { useStoredSession } from '../session/session'
-import {
-  changeCurrentUserContact,
-  deleteCurrentUser,
-  type VerificationChannel,
-} from './api'
+import { changeCurrentUserContact, deleteCurrentUser, type VerificationChannel } from './api'
+import { useAsyncAction } from './useAsyncAction'
 import { VerificationCodeButton } from './VerificationCodeButton'
 
 export function AccountSecurityPage() {
   const { session, saveSession } = useStoredSession()
   const navigate = useNavigate()
-  const [error, setError] = useState('')
+  const { error, setError, busy, run } = useAsyncAction()
   const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
   const [phone, setPhone] = useState(session?.user.phone || '')
   const [phoneCode, setPhoneCode] = useState('')
   const [email, setEmail] = useState(session?.user.email || '')
@@ -30,50 +26,27 @@ export function AccountSecurityPage() {
   const defaultDeleteChannel: VerificationChannel = session?.user.phone ? 'sms' : 'email'
   const [deleteChannel, setDeleteChannel] = useState<VerificationChannel>(defaultDeleteChannel)
 
-  if (!session) {
-    return (
-      <div className="page signed-out-state">
-        <strong>登录后管理账号</strong>
-        <LoginLink className="primary-link">前往登录</LoginLink>
-      </div>
-    )
-  }
+  if (!session) return <SignedOutState title="登录后管理账号" />
 
-  const changeContact = async (channel: VerificationChannel) => {
-    setBusy(true)
-    setError('')
-    try {
-      const user = await changeCurrentUserContact({
-        data: {
-          token: session.token,
-          channel,
-          code: channel === 'sms' ? phoneCode : emailCode,
-          ...(channel === 'sms' ? { phone, phoneRegion: '86' } : { email }),
-        },
-      })
-      saveSession({ ...session, user })
-      setNotice(channel === 'sms' ? '手机号已更新。' : '邮箱已更新。')
-      setEditing(null)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '联系方式更新失败')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const changeContact = (channel: VerificationChannel) => run('联系方式更新失败', async () => {
+    const user = await changeCurrentUserContact({
+      data: {
+        token: session.token,
+        channel,
+        code: channel === 'sms' ? phoneCode : emailCode,
+        ...(channel === 'sms' ? { phone, phoneRegion: '86' } : { email }),
+      },
+    })
+    saveSession({ ...session, user })
+    setNotice(channel === 'sms' ? '手机号已更新。' : '邮箱已更新。')
+    setEditing(null)
+  })
 
-  const removeAccount = async () => {
-    setBusy(true)
-    setError('')
-    try {
-      await deleteCurrentUser({ data: { token: session.token, channel: deleteChannel, code: deleteCode } })
-      saveSession(null)
-      await navigate({ to: '/login' })
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '账号注销失败')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const removeAccount = () => run('账号注销失败', async () => {
+    await deleteCurrentUser({ data: { token: session.token, channel: deleteChannel, code: deleteCode } })
+    saveSession(null)
+    await navigate({ to: '/login' })
+  })
 
   const editContact = editing === 'sms' ? phone : email
   const editCode = editing === 'sms' ? phoneCode : emailCode

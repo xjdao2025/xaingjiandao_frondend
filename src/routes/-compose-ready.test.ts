@@ -8,7 +8,7 @@ vi.mock('~/features/session/session', () => ({ readStoredSession: () => state.se
 vi.mock('~/features/feed/ComposePanel', () => ({ ComposePanel: () => null }))
 vi.mock('~/features/feed/post-draft', () => ({ readPostDraft: api.postDraft }))
 vi.mock('~/features/nodes/api', () => ({ getNodes: api.nodes }))
-vi.mock('~/features/tasks/api', () => ({ getTasks: api.tasks, getTask: api.task }))
+vi.mock('~/features/tasks/api', () => ({ getTaskPage: api.tasks, getTask: api.task }))
 vi.mock('~/features/events/api', () => ({ getEvents: api.events, getEvent: api.event }))
 vi.mock('../routeTree.gen', async () => {
   const { createRootRoute, createRoute } = await import('@tanstack/react-router')
@@ -36,7 +36,7 @@ it('loads the explicitly selected published task without opening another draft',
 import { getRouter } from '../router'
 
 it('keeps the previous page until the selected publish form and its draft are ready', async () => {
-  let finishDraft!: (value: unknown[]) => void
+  let finishDraft!: (value: { data: unknown[] }) => void
   api.nodes.mockResolvedValue([{ id: 'community', name: '社区' }])
   api.postDraft.mockResolvedValue(null)
   api.tasks.mockImplementation(() => new Promise(resolve => { finishDraft = resolve }))
@@ -50,7 +50,7 @@ it('keeps the previous page until the selected publish form and its draft are re
   expect(api.events).not.toHaveBeenCalled()
 
   const draft = { id: 'task-draft', title: '待续任务' }
-  finishDraft([draft])
+  finishDraft({ data: [draft] })
   await navigation
   expect(router.state.matches.at(-1)?.loaderData).toMatchObject({ kind: 'task', managedNodes: [{ id: 'community' }], taskDraft: draft })
   expect(router.state.resolvedLocation?.pathname).toBe('/compose')

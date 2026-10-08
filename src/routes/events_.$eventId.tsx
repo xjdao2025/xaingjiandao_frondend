@@ -1,18 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { EventDetail } from '~/features/events/EventDetail'
 import { getEvent } from '~/features/events/api'
-import { readStoredSession } from '~/features/session/session'
+import { viewerDeps, viewerLoader } from './-loaders'
 
 export const Route = createFileRoute('/events_/$eventId')({
   ssr: false,
-  loaderDeps: () => ({ token: readStoredSession()?.token ?? null }),
-  loader: async ({ params, deps }) => {
-    try {
-      return { event: await getEvent({ data: { id: params.eventId, token: deps.token ?? undefined } }), error: '', viewerToken: deps.token }
-    } catch (reason) {
-      return { event: null, error: reason instanceof Error ? reason.message : '活动暂时无法加载', viewerToken: deps.token }
-    }
-  },
+  loaderDeps: viewerDeps,
+  loader: ({ params, deps }) =>
+    viewerLoader('event', deps.token, () => getEvent({ data: { id: params.eventId, token: deps.token ?? undefined } }), '活动暂时无法加载'),
   component: EventRoute,
 })
 

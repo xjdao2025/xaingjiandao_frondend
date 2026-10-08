@@ -2,6 +2,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { useEffect, useRef, useState } from 'react'
 
 import { sendVerificationCode, type VerificationChannel, type VerificationPurpose } from './api'
+import { errorMessage } from '~/lib/util'
 
 type Props = {
   channel: VerificationChannel
@@ -63,7 +64,7 @@ export function VerificationCodeButton({ channel, contact, phoneRegion = '86', p
       if (result.sent) onSent?.()
       else onError(`发送太频繁，请 ${result.retryAfter} 秒后重试。`)
     } catch (reason) {
-      if (currentKey.current === key) onError(reason instanceof Error ? reason.message : '验证码发送失败')
+      if (currentKey.current === key) onError(errorMessage(reason, '验证码发送失败'))
     } finally {
       inFlight.current = false
       setSending(false)

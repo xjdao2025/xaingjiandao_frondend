@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { BACKEND_BASE, readJson, requestJson } from '~/lib/http'
+import { BACKEND_BASE, backend, backendData, readJson, withQuery } from '~/lib/http'
 import type { RiceAttachment, RicePublicUser } from '~/lib/models'
 
 export type Foundation = { fund_scale: number; proposal_approval_votes: number; documents: RiceAttachment[] }
@@ -18,58 +18,44 @@ export type ProposalComment = { id: string; body: string; author: RicePublicUser
 export type GrainGrant = { id: string; amount: number; memo: string; inserted_at: string; to: RicePublicUser | null; to_node: { id: string; name: string } | null }
 type PageInput = { before?: string; limit?: number }
 
-function pageQuery(data: PageInput & { status?: ProposalStatus }) {
-  const query = new URLSearchParams()
-  if (data.before) query.set('before', data.before)
-  if (data.limit !== undefined) query.set('limit', String(data.limit))
-  if (data.status) query.set('status', data.status)
-  return query.size ? `?${query}` : ''
-}
+const pageQuery = (data: PageInput & { status?: ProposalStatus }) =>
+  withQuery('', { before: data.before, limit: data.limit, status: data.status })
+const proposalPath = (id: string) => `/api/proposals/${encodeURIComponent(id)}`
 
-export async function loadFoundation() {
-  return (await requestJson<{ data: Foundation }>(`${BACKEND_BASE}/api/settings/foundation`)).data
+export function loadFoundation() {
+  return backendData<Foundation>('/api/settings/foundation')
 }
 
 export function loadAnnouncements(data: PageInput) {
-  return requestJson<GovernancePage<Announcement>>(`${BACKEND_BASE}/api/announcements${pageQuery(data)}`)
+  return backend<GovernancePage<Announcement>>(`/api/announcements${pageQuery(data)}`)
 }
 
 export function loadProposals(data: PageInput & { token?: string; status?: ProposalStatus }) {
-  return requestJson<GovernancePage<Proposal>>(`${BACKEND_BASE}/api/proposals${pageQuery(data)}`, {
-    headers: data.token ? { Authorization: `Bearer ${data.token}` } : undefined,
-  })
+  return backend<GovernancePage<Proposal>>(`/api/proposals${pageQuery(data)}`, { token: data.token })
 }
 
 export function loadGrainGrants(data: PageInput) {
-  return requestJson<GrainGrantPage>(`${BACKEND_BASE}/api/grain_grants${pageQuery(data)}`)
+  return backend<GrainGrantPage>(`/api/grain_grants${pageQuery(data)}`)
 }
 
 export async function loadAnnouncement(data: { id: string }) {
-  return (await requestJson<{ data: Announcement }>(`${BACKEND_BASE}/api/announcements/${encodeURIComponent(data.id)}`)).data
+  return backendData<Announcement>(`/api/announcements/${encodeURIComponent(data.id)}`)
 }
 
 export async function loadProposal(data: { id: string; token?: string }) {
-  return (await requestJson<{ data: Proposal }>(`${BACKEND_BASE}/api/proposals/${encodeURIComponent(data.id)}`, {
-    headers: data.token ? { Authorization: `Bearer ${data.token}` } : undefined,
-  })).data
+  return backendData<Proposal>(proposalPath(data.id), { token: data.token })
 }
 
 export async function sendProposalVote(data: { id: string; token: string; choice: VoteChoice }) {
-  return (await requestJson<{ data: ProposalVote }>(`${BACKEND_BASE}/api/proposals/${encodeURIComponent(data.id)}/vote`, {
-    method: 'POST', headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ choice: data.choice }),
-  })).data
+  return backendData<ProposalVote>(`${proposalPath(data.id)}/vote`, { method: 'POST', token: data.token, json: { choice: data.choice } })
 }
 
-export function loadProposalComments(data: { id: string } & PageInput) {
-  return requestJson<GovernancePage<ProposalComment>>(`${BACKEND_BASE}/api/proposals/${encodeURIComponent(data.id)}/comments${pageQuery(data)}`)
+export async function loadProposalComments(data: { id: string } & PageInput) {
+  return backend<GovernancePage<ProposalComment>>(`${proposalPath(data.id)}/comments${pageQuery(data)}`)
 }
 
 export async function sendProposalComment(data: { id: string; token: string; body: string }) {
-  return (await requestJson<{ data: ProposalComment }>(`${BACKEND_BASE}/api/proposals/${encodeURIComponent(data.id)}/comments`, {
-    method: 'POST', headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body: data.body }),
-  })).data
+  return backendData<ProposalComment>(`${proposalPath(data.id)}/comments`, { method: 'POST', token: data.token, json: { body: data.body } })
 }
 
 export async function loadGovernanceBody(data: { id: string }) {

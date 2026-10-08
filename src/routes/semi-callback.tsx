@@ -4,6 +4,7 @@ import { redeemSemiSession } from '~/features/session/api'
 import { loginReturnTo } from '~/features/session/login-redirect'
 import { useStoredSession } from '~/features/session/session'
 import type { RiceSession } from '~/lib/models'
+import { errorMessage } from '~/lib/util'
 
 export const Route = createFileRoute('/semi-callback')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -30,7 +31,7 @@ function SemiCallback() {
       saveSession(session)
       void navigate({ href: returnTo, replace: true })
     }).catch((reason) => {
-      if (active) setError(reason instanceof Error ? reason.message : '登录失败，请重试。')
+      if (active) setError(errorMessage(reason, '登录失败，请重试。'))
     })
     return () => { active = false }
   }, [ticket, callbackError, returnTo, saveSession, navigate])

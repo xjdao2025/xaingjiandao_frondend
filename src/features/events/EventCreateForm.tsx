@@ -12,6 +12,7 @@ import { integerInputError } from '~/lib/integer-input'
 import type { CommunityNode } from '../nodes/api'
 import type { RiceSession } from '~/lib/models'
 import { getEvents, saveEvent, type RiceEvent } from './api'
+import { errorMessage } from '~/lib/util'
 
 const emptyFields = { node_id: '', title: '', description: '', organizer_contact: '', location: '', application_deadline: '', starts_at: '', ends_at: '', fee_amount: '0', capacity: '' }
 type EventTimes = Pick<typeof emptyFields, 'application_deadline' | 'starts_at' | 'ends_at'>
@@ -122,7 +123,7 @@ export function EventCreateForm({ session, nodes, initialDraft, initialError = '
       window.dispatchEvent(new Event('rice-changed'))
       onPublished(event.id)
       return true
-    } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : '保存失败'); return false } finally { if (mounted.current) setBusy(false) }
+    } catch (e) { if (mounted.current) setError(errorMessage(e, '保存失败')); return false } finally { if (mounted.current) setBusy(false) }
   }
   const amountError = fields.fee_amount === '' ? null : integerInputError(fields.fee_amount, '每人所需稻米')
   const feeReadOnly = editing && ['open', 'in_progress'].includes(initialDraft?.status ?? '')

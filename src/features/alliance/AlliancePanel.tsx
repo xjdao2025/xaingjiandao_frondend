@@ -14,40 +14,12 @@ import type { RiceAttachment } from '~/lib/models'
 import { getNodes, type CommunityNode } from '../nodes/api'
 import { LoginLink } from '../session/LoginLink'
 import { readStoredSession, useStoredSession } from '../session/session'
-import { getAnnouncement, getAnnouncements, getFoundation, getGovernanceBody, getGrainGrants, getProposal, getProposals, voteOnProposal, type Announcement, type Foundation, type GovernancePage, type Proposal, type ProposalStatus, type VoteChoice } from './api'
+import { getAnnouncement, getAnnouncements, getFoundation, getGovernanceBody, getGrainGrants, getProposal, getProposals, voteOnProposal, type Announcement, type Foundation, type Proposal, type ProposalStatus, type VoteChoice } from './api'
 import { ProposalComments } from './ProposalComments'
+import { useGovernanceList } from './useGovernanceList'
+import { errorMessage } from '~/lib/util'
 
 const statusLabels = { open: '进行中', passed: '已通过', rejected: '未通过' }
-
-// Both governance lists share cursor loading and reject replies from a previous filter/session.
-function useGovernanceList<T extends { id: string }>(key: string, load: (before?: string) => Promise<GovernancePage<T>>) {
-  const [state, setState] = useState<{ key: string; page: GovernancePage<T> | null; loading: boolean; error: string }>({ key, page: null, loading: true, error: '' })
-  const [revision, setRevision] = useState(0)
-  const request = useRef(0)
-  const pending = useRef(false)
-  useEffect(() => {
-    const version = ++request.current
-    pending.current = true
-    setState({ key, page: null, loading: true, error: '' })
-    void load().then((page) => { if (version === request.current) setState({ key, page, loading: false, error: '' }) })
-      .catch((e: Error) => { if (version === request.current) setState({ key, page: null, loading: false, error: e.message }) })
-      .finally(() => { if (version === request.current) pending.current = false })
-    return () => { ++request.current; pending.current = false }
-  }, [key, revision])
-  const current = state.key === key ? state : null
-  const more = async () => {
-    const before = current?.page?.meta.next_cursor
-    if (!before || pending.current) return
-    const version = request.current
-    pending.current = true; setState((s) => ({ ...s, loading: true, error: '' }))
-    try {
-      const page = await load(before)
-      if (version === request.current) setState((s) => ({ ...s, loading: false, page: { ...page, data: [...new Map([...(s.page?.data ?? []), ...page.data].map((item) => [item.id, item])).values()] } }))
-    } catch (e) { if (version === request.current) setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e.message : '加载失败。' })) }
-    finally { if (version === request.current) pending.current = false }
-  }
-  return { page: current?.page, loading: current?.loading ?? true, error: current?.error ?? '', more, retry: () => setRevision((v) => v + 1) }
-}
 
 export function AlliancePanel() {
   const [foundation, setFoundation] = useState<Foundation | null>(null)
@@ -167,7 +139,7 @@ export function GovernanceDetail({ kind, id }: { kind: 'announcement' | 'proposa
       setVoteChoice(null)
       const value = await getProposal({ data: { id, token } })
       if (current()) setDocument(value)
-    } catch (e) { if (current()) setError(e instanceof Error ? e.message : '投票失败。') }
+    } catch (e) { if (current()) setError(errorMessage(e, '投票失败。')) }
     finally { pending.current = false; if (current()) setBusy(false) }
   }
   const closeConfirmation = () => { if (!pending.current) setVoteChoice(null) }

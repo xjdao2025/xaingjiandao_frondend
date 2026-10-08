@@ -1,6 +1,6 @@
 import { Button } from '@astryxdesign/core/Button'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import { PostList } from '~/components/PostList'
 import { AutoLoadMore } from '~/components/AutoLoadMore'
@@ -14,6 +14,7 @@ import { postCategory } from '../feed/tags'
 
 import { useStoredSession } from '../session/session'
 import { hasMoreHistory, loadPublicHistoryPage, type HistoryPage, type HistorySource, type PublicHistory } from './public-history'
+import { errorMessage } from '~/lib/util'
 
 type ProfileTab = 'tasks' | 'activities' | 'posts'
 
@@ -32,21 +33,16 @@ export function PublicProfileContent({ actor }: { actor: string }) {
     <>
       <div className="social-profile-tabs filter-buttons" role="group" aria-label="用户公开内容">
         {tabs.map((tab) => (
-          <Button
-            label={tab.label}
-            variant="ghost"
-            size="sm"
-            className={activeTab === tab.value ? 'active' : undefined}
-            aria-pressed={activeTab === tab.value}
-            clickAction={() => setActiveTab(tab.value)}
-            key={tab.value}
-          />
+          <Button label={tab.label} variant="ghost" size="sm" className={activeTab === tab.value ? 'active' : undefined}
+            aria-pressed={activeTab === tab.value} clickAction={() => setActiveTab(tab.value)} key={tab.value} />
         ))}
       </div>
 
       {activeTab === 'posts' ? <PublicPosts key={contentKey} actor={actor} /> : null}
-      {activeTab === 'activities' ? <PublicActivities key={contentKey} actor={actor} /> : null}
-      {activeTab === 'tasks' ? <PublicTasks key={contentKey} actor={actor} /> : null}
+      {activeTab === 'activities' ? <PublicHistoryList key={contentKey} actor={actor} load={getEvents} failure="活动记录暂时无法显示"
+        empty="还没有活动记录" card={(event) => <EventCard event={event} key={event.id} />} /> : null}
+      {activeTab === 'tasks' ? <PublicHistoryList key={contentKey} actor={actor} load={getTaskPage} failure="任务记录暂时无法显示"
+        empty="还没有任务记录" card={(task) => <TaskCard task={task} key={task.id} />} /> : null}
     </>
   )
 }
@@ -62,37 +58,31 @@ function PublicPosts({ actor }: { actor: string }) {
   return <>{error && <div className="inline-error" role="alert">{error}</div>}<PostList posts={posts.filter((p) => postCategory(p.record) === 'post')} />{feed?.cursor && <AutoLoadMore key={`${actor}:${session?.pds.did}`} cursor={feed.cursor} loading={loading} failed={!!error} onLoadMore={more} />}</>
 }
 
-function PublicTasks({ actor }: { actor: string }) {
+type HistoryItem = { id: string; inserted_at: string }
+type HistoryListProps<T extends HistoryItem> = {
+  actor: string
+  load: (input: { data: { token?: string; creatorDid?: string; participantDid?: string; before?: string } }) => Promise<HistoryPage<T>>
+  failure: string
+  empty: string
+  card: (item: T) => ReactNode
+}
+
+function PublicHistoryList<T extends HistoryItem>({ actor, load, failure, empty, card }: HistoryListProps<T>) {
   const { session } = useStoredSession()
-  const fetchPage = useCallback((source: HistorySource, before?: string) => getTaskPage({ data: {
+  const fetchPage = useCallback((source: HistorySource, before?: string) => load({ data: {
     token: session?.token,
     ...(source === 'created' ? { creatorDid: actor } : { participantDid: actor }),
     before,
-  } }), [actor, session?.token])
-  const { history, loading, error, more } = usePublicRiceHistory(fetchPage, '任务记录暂时无法显示')
-  if (!history || (!history.items.length && !hasMoreHistory(history.cursors))) return <ProfileContentState error={error} items={history?.items ?? null} empty="还没有任务记录" />
+  } }), [actor, load, session?.token])
+  const { history, loading, error, more } = usePublicRiceHistory(fetchPage, failure)
+  if (!history || (!history.items.length && !hasMoreHistory(history.cursors))) return <ProfileContentState error={error} items={history?.items ?? null} empty={empty} />
   return <>{error && <div className="inline-error" role="alert">{error}</div>}
-    <section className="task-list public-profile-list">{history.items.map((task) => <TaskCard task={task} key={task.id} />)}</section>
+    <section className="task-list public-profile-list">{history.items.map(card)}</section>
     {hasMoreHistory(history.cursors) && <AutoLoadMore cursor={JSON.stringify(history.cursors)} loading={loading} failed={!!error} onLoadMore={more} />}
   </>
 }
 
-function PublicActivities({ actor }: { actor: string }) {
-  const { session } = useStoredSession()
-  const fetchPage = useCallback((source: HistorySource, before?: string) => getEvents({ data: {
-    token: session?.token,
-    ...(source === 'created' ? { creatorDid: actor } : { participantDid: actor }),
-    before,
-  } }), [actor, session?.token])
-  const { history, loading, error, more } = usePublicRiceHistory(fetchPage, '活动记录暂时无法显示')
-  if (!history || (!history.items.length && !hasMoreHistory(history.cursors))) return <ProfileContentState error={error} items={history?.items ?? null} empty="还没有活动记录" />
-  return <>{error && <div className="inline-error" role="alert">{error}</div>}
-    <section className="task-list public-profile-list">{history.items.map((event) => <EventCard event={event} key={event.id} />)}</section>
-    {hasMoreHistory(history.cursors) && <AutoLoadMore cursor={JSON.stringify(history.cursors)} loading={loading} failed={!!error} onLoadMore={more} />}
-  </>
-}
-
-function usePublicRiceHistory<T extends { id: string; inserted_at: string }>(
+function usePublicRiceHistory<T extends HistoryItem>(
   fetchPage: (source: HistorySource, before?: string) => Promise<HistoryPage<T>>,
   failureMessage: string,
 ) {
@@ -106,7 +96,7 @@ function usePublicRiceHistory<T extends { id: string; inserted_at: string }>(
     setHistory(null); setError('')
     void loadPublicHistoryPage(fetchPage)
       .then((page) => { if (current === request.current) setHistory(page) })
-      .catch((reason) => { if (current === request.current) setError(reason instanceof Error ? reason.message : failureMessage) })
+      .catch((reason) => { if (current === request.current) setError(errorMessage(reason, failureMessage)) })
     return () => { request.current++ }
   }, [fetchPage, failureMessage])
 
@@ -118,21 +108,13 @@ function usePublicRiceHistory<T extends { id: string; inserted_at: string }>(
       const page = await loadPublicHistoryPage(fetchPage, history)
       if (current === request.current) setHistory(page)
     } catch (reason) {
-      if (current === request.current) setError(reason instanceof Error ? reason.message : failureMessage)
+      if (current === request.current) setError(errorMessage(reason, failureMessage))
     } finally { if (current === request.current) setLoading(false) }
   }
   return { history, loading, error, more }
 }
 
-function ProfileContentState<T>({
-  error,
-  items,
-  empty,
-}: {
-  error: string
-  items: T[] | null
-  empty: string
-}) {
+function ProfileContentState<T>({ error, items, empty }: { error: string; items: T[] | null; empty: string }) {
   if (error) return <div className="form-error public-profile-state" role="alert">{error}</div>
   if (!items) return <LoadingState label="正在加载…" className="loading-line public-profile-state" />
   return (

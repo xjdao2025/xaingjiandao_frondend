@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { BACKEND_BASE, requestJson } from '~/lib/http'
+import { backend, backendData, searchParams } from '~/lib/http'
 import type { RicePublicUser, RiceAttachment, HistorySnapshot } from '~/lib/models'
 import type { CommunityNode } from '../nodes/api'
 
@@ -34,18 +34,11 @@ export function eventSettlementAmount(event: Pick<RiceEvent, 'applications' | 'a
 export type EventListInput = { token?: string; q?: string; nodeId?: string; mine?: 'created' | 'applied' | 'managed'; creatorDid?: string; participantDid?: string; status?: EventStatus; before?: string }
 export type EventPage = { data: RiceEvent[]; meta?: { next_cursor?: string | null } }
 export async function fetchEventPage(data: EventListInput) {
-  const q = new URLSearchParams()
-  if (data.creatorDid) q.set('creator_did', data.creatorDid)
-  if (data.participantDid) q.set('participant_did', data.participantDid)
-  if (data.q) q.set('q', data.q)
-  if (data.nodeId) q.set('node_id', data.nodeId)
-  if (data.mine) q.set('mine', data.mine)
-  if (data.status) q.set('status', data.status)
-  if (data.before) q.set('before', data.before)
-  return requestJson<EventPage>(`${BACKEND_BASE}/api/events?${q}`, { headers: data.token ? { Authorization: `Bearer ${data.token}` } : undefined })
+  const q = searchParams({ creator_did: data.creatorDid, participant_did: data.participantDid, q: data.q, node_id: data.nodeId, mine: data.mine, status: data.status, before: data.before })
+  return backend<EventPage>(`/api/events?${q}`, { token: data.token })
 }
 export const getEvents = createServerFn({ method: 'POST' }).validator((data: EventListInput) => data).handler(({ data }) => fetchEventPage(data))
-export const getEvent = createServerFn({ method: 'POST' }).validator((data: { id: string; token?: string }) => data).handler(async ({ data }) => (await requestJson<{ data: RiceEvent }>(`${BACKEND_BASE}/api/events/${encodeURIComponent(data.id)}`, { headers: data.token ? { Authorization: `Bearer ${data.token}` } : undefined })).data)
+export const getEvent = createServerFn({ method: 'POST' }).validator((data: { id: string; token?: string }) => data).handler(async ({ data }) => backendData<RiceEvent>(`/api/events/${encodeURIComponent(data.id)}`, { token: data.token }))
 export type EventDraftInput = { organizer_contact?: string; attachment_ids?: string[]; node_id: string; title: string; description: string; location: string; application_deadline: string; starts_at: string; ends_at: string; fee_amount: number; capacity: number; client_request_id: string }
 export type SaveEventInput = { token: string; id?: string; editing?: boolean; status: 'draft' | 'open'; fields: EventDraftInput }
 function sameEventContent(event: RiceEvent, fields: EventDraftInput) {
@@ -58,27 +51,29 @@ function sameEventContent(event: RiceEvent, fields: EventDraftInput) {
 }
 
 export async function saveEventRequest(data: SaveEventInput) {
-  const headers = { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' }
-  const base = `${BACKEND_BASE}/api/events`
+  // GETs and publish deliberately send the JSON content type too.
+  const init = { token: data.token, headers: { 'Content-Type': 'application/json' } }
+  const path = (id: string) => `/api/events/${encodeURIComponent(id)}`
+  const patch = (id: string) => backendData<RiceEvent>(path(id), { ...init, method: 'PATCH', body: JSON.stringify(data.fields) })
   if (data.editing) {
     if (!data.id) throw new Error('未找到要编辑的活动，请重新打开详情页。')
-    const event = (await requestJson<{ data: RiceEvent }>(`${base}/${encodeURIComponent(data.id)}`, { headers })).data
+    const event = await backendData<RiceEvent>(path(data.id), init)
     if (!event.allowed_actions.includes('edit')) throw new Error('此活动目前不能编辑。')
     if (event.status !== 'cancelled' && sameEventContent(event, data.fields)) return event
-    return (await requestJson<{ data: RiceEvent }>(`${base}/${encodeURIComponent(data.id)}`, { method: 'PATCH', headers, body: JSON.stringify(data.fields) })).data
+    return patch(data.id)
   }
   // Always obtain a recoverable draft first. Reusing its request key can return
   // the prior record after a lost response, with content that needs updating.
-  let event = (await requestJson<{ data: RiceEvent }>(data.id ? `${base}/${encodeURIComponent(data.id)}` : base, data.id
-    ? { headers }
-    : { method: 'POST', headers, body: JSON.stringify({ ...data.fields, status: 'draft' }) })).data
+  let event = await (data.id
+    ? backendData<RiceEvent>(path(data.id), init)
+    : backendData<RiceEvent>('/api/events', { ...init, method: 'POST', body: JSON.stringify({ ...data.fields, status: 'draft' }) }))
   const same = sameEventContent(event, data.fields)
   if (event.status !== 'draft') {
     if (data.status === 'open' && event.status !== 'cancelled' && same) return event
     throw new Error('上次提交的活动已发布。请前往活动详情编辑。')
   }
-  if (!same) event = (await requestJson<{ data: RiceEvent }>(`${base}/${encodeURIComponent(event.id)}`, { method: 'PATCH', headers, body: JSON.stringify(data.fields) })).data
-  if (data.status === 'open') return (await requestJson<{ data: RiceEvent }>(`${base}/${encodeURIComponent(event.id)}/publish`, { method: 'POST', headers })).data
+  if (!same) event = await patch(event.id)
+  if (data.status === 'open') return backendData<RiceEvent>(`${path(event.id)}/publish`, { ...init, method: 'POST' })
   return event
 }
 export const saveEvent = createServerFn({ method: 'POST' }).validator((data: SaveEventInput) => data).handler(({ data }) => saveEventRequest(data))
@@ -86,6 +81,6 @@ export type EventActionInput = { token: string; id: string; action: 'apply' | 'a
 export async function eventActionRequest(data: EventActionInput) {
   if (data.action === 'withdraw' && !data.applicationId) throw new Error('未找到要撤销的申请，请重新打开活动详情。')
   const suffix = data.action === 'apply' ? 'applications' : data.applicationId ? `applications/${encodeURIComponent(data.applicationId)}/${data.action}` : data.action
-  return (await requestJson<{ data: RiceEvent }>(`${BACKEND_BASE}/api/events/${encodeURIComponent(data.id)}/${suffix}`, { method: 'POST', headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: data.reason, contact: data.contact }) })).data
+  return backendData<RiceEvent>(`/api/events/${encodeURIComponent(data.id)}/${suffix}`, { method: 'POST', token: data.token, json: { reason: data.reason, contact: data.contact } })
 }
 export const eventAction = createServerFn({ method: 'POST' }).validator((data: EventActionInput) => data).handler(({ data }) => eventActionRequest(data))

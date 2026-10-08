@@ -12,6 +12,7 @@ import {
   getSocialConnections,
   type SocialConnectionKind,
 } from './api'
+import { errorMessage, mergeBy } from '~/lib/util'
 
 export function PeopleListPage({
   actor,
@@ -51,11 +52,11 @@ export function PeopleListPage({
       if (currentRequest !== request.current) return
       setMore({ base: initialPage, page: {
         subject: next.subject,
-        profiles: [...new Map([...page.profiles, ...next.profiles].map((profile) => [profile.did, profile])).values()],
+        profiles: mergeBy([...page.profiles, ...next.profiles], (profile) => profile.did),
         cursor: next.cursor,
       } })
     } catch (reason) {
-      if (currentRequest === request.current) setFailure({ base: initialPage, message: reason instanceof Error ? reason.message : `${title}列表暂时无法显示` })
+      if (currentRequest === request.current) setFailure({ base: initialPage, message: errorMessage(reason, `${title}列表暂时无法显示`) })
     } finally {
       if (currentRequest === request.current) setLoading(false)
     }
@@ -75,12 +76,7 @@ export function PeopleListPage({
       {page.profiles.length ? (
         <div className="people-list">
           {page.profiles.map((profile) => (
-            <Link
-              to="/profile/$actor"
-              params={{ actor: profile.did }}
-              className="person-row"
-              key={profile.did}
-            >
+            <Link to="/profile/$actor" params={{ actor: profile.did }} className="person-row" key={profile.did}>
               <Avatar name={authorDisplayName(profile)} src={profile.avatar} />
               <span className="person-copy">
                 <strong>{authorDisplayName(profile)}</strong>
@@ -92,10 +88,7 @@ export function PeopleListPage({
         </div>
       ) : !error ? (
         <div className="empty-panel">
-          <EmptyState
-            title={kind === 'followers' ? '还没有粉丝' : '还没有关注任何人'}
-            description="这里会显示真实的关注关系。"
-          />
+          <EmptyState title={kind === 'followers' ? '还没有粉丝' : '还没有关注任何人'} description="这里会显示真实的关注关系。" />
         </div>
       ) : null}
       {page.cursor && <AutoLoadMore key={`${actor}:${kind}:${session?.pds.did}`} cursor={page.cursor} loading={isLoading} failed={!!error} onLoadMore={load} />}

@@ -5,3 +5,14 @@ export function LoginLink({ children, className, returnTo }: { children: ReactNo
   const currentHref = useRouterState({ select: (state) => state.location.href })
   return <Link to="/login" search={{ returnTo: returnTo ?? currentHref }} className={className}>{children}</Link>
 }
+
+export function SignedOutState({ title, icon, children }: { title: string; icon?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="page signed-out-state">
+      {icon}
+      <strong>{title}</strong>
+      {children}
+      <LoginLink className="primary-link">前往登录</LoginLink>
+    </div>
+  )
+}

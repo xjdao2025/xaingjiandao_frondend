@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { BACKEND_BASE, requestJson } from '~/lib/http'
+import { backend, backendData, searchParams, withQuery } from '~/lib/http'
 
 import type { RiceTask, TaskListStatus, TaskMine } from './types'
 
@@ -18,45 +18,30 @@ export type TaskListInput = {
   before?: string
 }
 
-export type TaskPage = {
-  data: RiceTask[]
-  meta: { next_cursor: string | null }
-}
+export type TaskPage = { data: RiceTask[]; meta: { next_cursor: string | null } }
 
-const authHeaders = (token?: string) =>
-  token ? { Authorization: `Bearer ${token}` } : undefined
+/** 任务接口的路径：每一段都编码，id 里带 `../` 也越不出 /api/tasks。 */
+const taskPath = (...segments: string[]) => ['/api/tasks', ...segments.map(encodeURIComponent)].join('/')
 
-/** 任务接口的 URL：每一段都编码，id 里带 `../` 也越不出 /api/tasks。 */
-const taskUrl = (...segments: string[]) =>
-  [`${BACKEND_BASE}/api/tasks`, ...segments.map(encodeURIComponent)].join('/')
+const taskListParams = (data: TaskListInput) => ({
+  node_id: data.nodeId,
+  available: data.available && 'true',
+  mine: data.mine,
+  status: data.status,
+  participant_did: data.participantDid,
+  creator_did: data.creatorDid,
+  q: data.q?.trim(),
+  sort: data.sort,
+  limit: data.limit || undefined,
+  before: data.before,
+})
 
-export function buildTaskListQuery(data: TaskListInput) {
-  const query = new URLSearchParams()
-  if (data.nodeId) query.set('node_id', data.nodeId)
-  if (data.available) query.set('available', 'true')
-  if (data.mine) query.set('mine', data.mine)
-  if (data.status) query.set('status', data.status)
-  if (data.participantDid) query.set('participant_did', data.participantDid)
-  if (data.creatorDid) query.set('creator_did', data.creatorDid)
-  if (data.q?.trim()) query.set('q', data.q.trim())
-  if (data.sort) query.set('sort', data.sort)
-  if (data.limit) query.set('limit', String(data.limit))
-  if (data.before) query.set('before', data.before)
-  return query.toString()
-}
+export const buildTaskListQuery = (data: TaskListInput) => searchParams(taskListParams(data)).toString()
 
 export async function fetchTaskPage(data: TaskListInput) {
-  const query = buildTaskListQuery(data)
-  const suffix = query ? `?${query}` : ''
-  const page = await requestJson<TaskPage>(`${BACKEND_BASE}/api/tasks${suffix}`, {
-    headers: authHeaders(data.token),
-  })
+  const page = await backend<TaskPage>(withQuery('/api/tasks', taskListParams(data)), { token: data.token })
   return data.mine ? page : { ...page, data: page.data.filter((task) => task.status !== 'cancelled') }
 }
-
-export const getTasks = createServerFn({ method: 'POST' })
-  .validator((data: TaskListInput) => data)
-  .handler(async ({ data }) => (await fetchTaskPage(data)).data)
 
 export const getTaskPage = createServerFn({ method: 'POST' })
   .validator((data: TaskListInput) => data)
@@ -64,12 +49,7 @@ export const getTaskPage = createServerFn({ method: 'POST' })
 
 export const getTask = createServerFn({ method: 'POST' })
   .validator((data: { id: string; token?: string }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(taskUrl(data.id), {
-      headers: authHeaders(data.token),
-    })
-    return body.data
-  })
+  .handler(async ({ data }) => backendData<RiceTask>(taskPath(data.id), { token: data.token }))
 
 type TaskFields = {
   token: string
@@ -102,23 +82,12 @@ export const taskDraftBody = (data: TaskFields) => ({
 
 export const createTask = createServerFn({ method: 'POST' })
   .validator((data: TaskFields & { status: 'draft' | 'open'; applicationDeadline?: string }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(`${BACKEND_BASE}/api/tasks`, {
-      method: 'POST',
-      headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...taskDraftBody(data), status: data.status }),
-    })
-    return body.data
-  })
+  .handler(async ({ data }) => backendData<RiceTask>('/api/tasks', {
+    method: 'POST', token: data.token, json: { ...taskDraftBody(data), status: data.status },
+  }))
 
-const send = async (token: string, method: 'POST' | 'PATCH', segments: string[], payload?: object) => {
-  const body = await requestJson<{ data: RiceTask }>(taskUrl(...segments), {
-    method,
-    headers: payload ? { ...authHeaders(token), 'Content-Type': 'application/json' } : authHeaders(token),
-    body: payload && JSON.stringify(payload),
-  })
-  return body.data
-}
+const send = async (token: string, method: 'POST' | 'PATCH', segments: string[], payload?: object) =>
+  backendData<RiceTask>(taskPath(...segments), { method, token, json: payload })
 
 export const updateTask = createServerFn({ method: 'POST' })
   .validator((data: TaskFields & { taskId: string; applicationDeadline: string | null }) => data)

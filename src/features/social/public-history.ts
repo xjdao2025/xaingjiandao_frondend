@@ -1,3 +1,5 @@
+import { mergeBy } from '~/lib/util'
+
 export type HistorySource = 'created' | 'participated'
 export type HistoryCursors = Record<HistorySource, string | null>
 export type HistoryPage<T> = { data: T[]; meta?: { next_cursor?: string | null } }
@@ -15,7 +17,7 @@ export async function loadPublicHistoryPage<T extends { id: string; inserted_at:
   const pages = await Promise.all(sources.map((source) => fetchPage(source, previous?.cursors[source] ?? undefined)))
   const cursors: HistoryCursors = previous ? { ...previous.cursors } : { created: null, participated: null }
   sources.forEach((source, index) => { cursors[source] = pages[index].meta?.next_cursor ?? null })
-  const items = [...new Map([...(previous?.items ?? []), ...pages.flatMap((page) => page.data)].map((item) => [item.id, item])).values()]
+  const items = mergeBy([...(previous?.items ?? []), ...pages.flatMap((page) => page.data)], (item) => item.id)
     .sort((a, b) => b.inserted_at.localeCompare(a.inserted_at))
   return { items, cursors }
 }

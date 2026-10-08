@@ -1,4 +1,4 @@
-import { LoginLink } from '../session/LoginLink'
+import { SignedOutState } from '../session/LoginLink'
 import { PostList } from '~/components/PostList'
 import { AutoLoadMore } from '~/components/AutoLoadMore'
 import { LoadingState } from '~/components/LoadingState'
@@ -11,12 +11,7 @@ export function MyPostsPage() {
   const { feed, error, loading, more } = useActorPosts(session?.pds.did, '帖子暂时无法加载')
 
   if (isReady && !session) {
-    return (
-      <div className="page signed-out-state">
-        <strong>登录后查看我的帖子</strong>
-        <LoginLink className="primary-link">前往登录</LoginLink>
-      </div>
-    )
+    return <SignedOutState title="登录后查看我的帖子" />
   }
 
   return (

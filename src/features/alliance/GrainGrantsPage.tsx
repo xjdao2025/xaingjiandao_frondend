@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 import { formatTimestamp } from '~/lib/format'
 import { getGrainGrants, type GrainGrantPage } from './api'
+import { errorMessage } from '~/lib/util'
 
 export function GrainGrantsPage({ initialPage }: { initialPage: GrainGrantPage }) {
   const [page, setPage] = useState(initialPage)
@@ -17,7 +18,7 @@ export function GrainGrantsPage({ initialPage }: { initialPage: GrainGrantPage }
       const next = await getGrainGrants({ data: { before: page.meta.next_cursor } })
       setPage((current) => ({ data: [...current.data, ...next.data], meta: next.meta }))
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '发放记录加载失败')
+      setError(errorMessage(reason, '发放记录加载失败'))
     } finally {
       setLoading(false)
     }

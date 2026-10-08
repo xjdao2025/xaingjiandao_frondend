@@ -13,6 +13,7 @@ import { readStoredSession, useStoredSession } from '../session/session'
 import { LoginLink } from '../session/LoginLink'
 import { getTransferRecipient, sendPersonalGrains, type PersonalTransfer } from './api'
 import { GrainScannerPage } from './GrainScannerPage'
+import { errorMessage } from '~/lib/util'
 
 export function grainReceiveLink(origin: string, did: string) {
   return `${origin}/profile/${encodeURIComponent(did)}?send=1`
@@ -102,7 +103,7 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
     } catch (reason) {
       if (current() && version === lookupVersion.current) {
         setRecipient(null)
-        setError(reason instanceof Error ? reason.message : '没找到这位伙伴，再核对一下账号。')
+        setError(errorMessage(reason, '没找到这位伙伴，再核对一下账号。'))
       }
       return null
     } finally {
@@ -138,7 +139,7 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
         if (current()) { window.dispatchEvent(new Event('rice-changed')); setReceipt(result) }
       }
     } catch (reason) {
-      if (current()) setError(reason instanceof Error ? reason.message : '送稻米失败。')
+      if (current()) setError(errorMessage(reason, '送稻米失败。'))
     } finally { pending.current = false; if (current()) setBusy(false) }
   }
   if (scanning) return <GrainScannerPage onRead={receiveCode} />

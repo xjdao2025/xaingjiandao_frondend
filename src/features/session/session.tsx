@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
 import type { RiceSession, RiceUser } from '~/lib/models'
 
@@ -16,9 +9,7 @@ const STORAGE_KEY = 'xiangjian-rice-session'
 const CHANGE_EVENT = 'xiangjian-session-change'
 const PDS_REFRESH_MARGIN_MS = 60_000
 const pendingRefreshes = new Map<string, Promise<RiceSession | null>>()
-type PdsRefresh = (input: {
-  data: RiceSession['pds']
-}) => Promise<RiceSession['pds'] | null>
+type PdsRefresh = (input: { data: RiceSession['pds'] }) => Promise<RiceSession['pds'] | null>
 
 type SessionState = {
   session: RiceSession | null
@@ -29,9 +20,14 @@ type SessionState = {
 
 const SessionContext = createContext<SessionState | null>(null)
 
+/** Adds a listener and returns its removal. */
+function listen<E extends Event>(target: EventTarget, type: string, listener: (event: E) => void) {
+  target.addEventListener(type, listener as EventListener)
+  return () => target.removeEventListener(type, listener as EventListener)
+}
+
 function readStoredValue(): unknown {
   if (typeof window === 'undefined') return null
-
   try {
     const value = window.localStorage.getItem(STORAGE_KEY)
     return value ? JSON.parse(value) : null
@@ -68,10 +64,7 @@ export async function refreshStoredUser(
   const user = await loadUser({ data: stored.token })
   const latest = readStoredCredentials()
   if (!isCurrent() || latest?.token !== stored.token || latest.pds.did !== stored.pds.did) return readStoredSession()
-  if (user === null) {
-    writeStoredSession(null)
-    return null
-  }
+  if (user === null) { writeStoredSession(null); return null }
   if (!isSessionUser(user) || user.did !== stored.pds.did) throw new Error('用户资料返回异常，请稍后重试。')
   const updated = { ...latest, user }
   writeStoredSession(updated)
@@ -124,25 +117,21 @@ export function watchPdsSessionLifetime(sync: () => Promise<void>) {
   const storageChanged = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY || event.key === null) check()
   }
-  window.addEventListener(CHANGE_EVENT, check)
-  window.addEventListener('storage', storageChanged)
-  window.addEventListener('pageshow', check)
-  document.addEventListener('visibilitychange', check)
+  const stops = [
+    listen(window, CHANGE_EVENT, check),
+    listen(window, 'storage', storageChanged),
+    listen(window, 'pageshow', check),
+    listen(document, 'visibilitychange', check),
+  ]
   check()
   return () => {
     active = false
     clearTimeout(timer)
-    window.removeEventListener(CHANGE_EVENT, check)
-    window.removeEventListener('storage', storageChanged)
-    window.removeEventListener('pageshow', check)
-    document.removeEventListener('visibilitychange', check)
+    stops.forEach((stop) => stop())
   }
 }
 
-export function refreshStoredSession(
-  stored: RiceSession,
-  refresh: PdsRefresh = refreshPdsSession,
-) {
+export function refreshStoredSession(stored: RiceSession, refresh: PdsRefresh = refreshPdsSession) {
   if (!isRiceSession(stored)) return Promise.reject(new Error('登录信息不完整，请重新登录。'))
   const key = stored.pds.refresh_jwt
   const pending = pendingRefreshes.get(key)
@@ -151,18 +140,14 @@ export function refreshStoredSession(
   const request = refresh({ data: stored.pds })
     .then((pds) => {
       const latest = readStoredSession()
-      const stillCurrent = latest?.token === stored.token &&
-        latest.pds.did === stored.pds.did && latest.pds.refresh_jwt === key
+      const stillCurrent = latest?.token === stored.token && latest.pds.did === stored.pds.did && latest.pds.refresh_jwt === key
       if (pds === null) {
         if (stillCurrent) writeStoredSession(null)
         return stillCurrent ? null : latest
       }
       if (!isPdsSession(pds) || pds.did !== stored.pds.did) throw new Error('登录状态刷新失败，请重新登录。')
-      const refreshed = { ...stored, pds }
-      if (stillCurrent) {
-        writeStoredSession({ ...latest, pds })
-      }
-      return refreshed
+      if (stillCurrent) writeStoredSession({ ...latest, pds })
+      return { ...stored, pds }
     })
     .finally(() => {
       if (pendingRefreshes.get(key) === request) pendingRefreshes.delete(key)
@@ -206,8 +191,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const storageChanged = (event: StorageEvent) => {
       if (event.key === STORAGE_KEY || event.key === null) void sync()
     }
-    window.addEventListener(CHANGE_EVENT, sync)
-    window.addEventListener('storage', storageChanged)
+    const stopSync = listen(window, CHANGE_EVENT, sync)
+    const stopStorage = listen(window, 'storage', storageChanged)
     void sync()
     const stopWatching = watchPdsSessionLifetime(async () => {
       const current = readStoredSession()
@@ -217,17 +202,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
       stopWatching()
-      window.removeEventListener(CHANGE_EVENT, sync)
-      window.removeEventListener('storage', storageChanged)
+      stopSync()
+      stopStorage()
     }
   }, [])
 
-  const saveSession = useCallback((next: RiceSession | null) => {
-    writeStoredSession(next)
-  }, [])
-
   return (
-    <SessionContext.Provider value={{ session, isReady, recoveryError, saveSession }}>
+    <SessionContext.Provider value={{ session, isReady, recoveryError, saveSession: writeStoredSession }}>
       {children}
     </SessionContext.Provider>
   )

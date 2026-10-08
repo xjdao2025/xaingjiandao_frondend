@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { errorMessage, mergeBy } from '~/lib/util'
 
 type Page<Row> = { data: Row[]; meta?: { next_cursor?: string | null } }
 type List<Row> = { rows: Row[]; cursor: string | null }
 
 export function appendPage<Row extends { id: string }>(current: List<Row>, page: Page<Row>): List<Row> {
   return {
-    rows: [...new Map([...current.rows, ...page.data].map((row) => [row.id, row])).values()],
+    rows: mergeBy([...current.rows, ...page.data], (row) => row.id),
     cursor: page.meta?.next_cursor ?? null,
   }
 }
@@ -63,7 +64,7 @@ export function usePagedBusinessList<Row extends { id: string }>({
       if (current !== request.current) return
       setList({ rows: page.data, cursor: page.meta?.next_cursor ?? null })
     }).catch((reason) => {
-      if (current === request.current) setError(reason instanceof Error ? reason.message : '加载失败')
+      if (current === request.current) setError(errorMessage(reason, '加载失败'))
     }).finally(() => {
       if (current === request.current) setLoading(false)
     })
@@ -81,7 +82,7 @@ export function usePagedBusinessList<Row extends { id: string }>({
       if (current !== request.current) return
       setList((existing) => appendPage(existing, page))
     } catch (reason) {
-      if (current === request.current) setError(reason instanceof Error ? reason.message : '加载失败')
+      if (current === request.current) setError(errorMessage(reason, '加载失败'))
     } finally {
       if (current === request.current) setLoading(false)
     }

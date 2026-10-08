@@ -9,6 +9,7 @@ import type { PostView, RiceSession } from '~/lib/models'
 
 import { readStoredSession } from '../session/session'
 import { sendPostReward, type PostReward } from './reward'
+import { errorMessage } from '~/lib/util'
 
 export function PostRewardDialog({ post, session, onClose }: { post: PostView; session: RiceSession; onClose: () => void }) {
   const [amount, setAmount] = useState('')
@@ -36,7 +37,7 @@ export function PostRewardDialog({ post, session, onClose }: { post: PostView; s
       window.dispatchEvent(new Event('rice-changed'))
       setReceipt(result)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '赞赏失败。')
+      setError(errorMessage(reason, '赞赏失败。'))
     } finally {
       pending.current = false
       setBusy(false)

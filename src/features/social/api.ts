@@ -1,69 +1,54 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { BACKEND_BASE, requestJson } from '~/lib/http'
+import { backend, searchParams } from '~/lib/http'
 import type { RicePublicUser, SocialConnectionPage, SocialProfile } from '~/lib/models'
-import { appviewImageUrl, createPdsRecord, deletePdsRecord, recordKeyFromUri } from '~/lib/pds'
+import { appviewImageUrl, createPdsRecord, deleteOwnRecord, xrpcGet } from '~/lib/pds'
 
 export type SocialConnectionKind = 'followers' | 'following'
 
-export type UserSearchPage = {
-  data: RicePublicUser[]
-  meta: { next_cursor: string | null }
-}
+export type UserSearchPage = { data: RicePublicUser[]; meta: { next_cursor: string | null } }
 
 async function loadUserSearch(data: { q: string; before?: string }) {
   const q = data.q.trim()
   if (!q) return { data: [], meta: { next_cursor: null } } satisfies UserSearchPage
-  const params = new URLSearchParams({ q, limit: '10' })
-  if (data.before) params.set('before', data.before)
-  return requestJson<UserSearchPage>(`${BACKEND_BASE}/api/users/search?${params}`)
+  return backend<UserSearchPage>(`/api/users/search?${searchParams({ q, limit: '10', before: data.before })}`)
 }
 
 export const searchUsers = createServerFn({ method: 'POST' })
   .validator((data: { q: string; before?: string }) => data)
   .handler(({ data }) => loadUserSearch(data))
 
-const authHeaders = (accessJwt?: string) =>
-  accessJwt ? { Authorization: `Bearer ${accessJwt}` } : undefined
-
 export function normalizeSocialProfile(value: unknown): SocialProfile {
   const profile = (value ?? {}) as Record<string, unknown>
   if (typeof profile.did !== 'string' || typeof profile.handle !== 'string') {
     throw new Error('用户资料暂时无法显示')
   }
-
   const viewer = (profile.viewer ?? {}) as Record<string, unknown>
+  // Optional keys stay absent (not undefined) when missing or empty.
+  const str = <K extends string>(key: K, value: unknown, map = (text: string) => text) =>
+    typeof value === 'string' && value ? { [key]: map(value) } as Record<K, string> : {}
+  const num = (value: unknown) => typeof value === 'number' ? value : 0
+  const viewerState = {
+    ...(typeof viewer.following === 'string' ? { following: viewer.following } : {}),
+    ...(typeof viewer.followedBy === 'string' ? { followedBy: viewer.followedBy } : {}),
+  }
   return {
     did: profile.did,
     handle: profile.handle,
-    ...(typeof profile.displayName === 'string' && profile.displayName
-      ? { displayName: profile.displayName }
-      : {}),
-    ...(typeof profile.description === 'string' && profile.description
-      ? { description: profile.description }
-      : {}),
-    ...(typeof profile.avatar === 'string' && profile.avatar
-      ? { avatar: appviewImageUrl(profile.avatar) }
-      : {}),
-    followersCount: typeof profile.followersCount === 'number' ? profile.followersCount : 0,
-    followsCount: typeof profile.followsCount === 'number' ? profile.followsCount : 0,
-    postsCount: typeof profile.postsCount === 'number' ? profile.postsCount : 0,
-    ...(typeof viewer.following === 'string' || typeof viewer.followedBy === 'string'
-      ? {
-          viewer: {
-            ...(typeof viewer.following === 'string' ? { following: viewer.following } : {}),
-            ...(typeof viewer.followedBy === 'string' ? { followedBy: viewer.followedBy } : {}),
-          },
-        }
-      : {}),
+    ...str('displayName', profile.displayName),
+    ...str('description', profile.description),
+    ...str('avatar', profile.avatar, appviewImageUrl),
+    followersCount: num(profile.followersCount),
+    followsCount: num(profile.followsCount),
+    postsCount: num(profile.postsCount),
+    ...(Object.keys(viewerState).length ? { viewer: viewerState } : {}),
   }
 }
 
 export async function loadSocialProfile(actor: string, accessJwt?: string) {
-  const params = new URLSearchParams({ actor })
   const [pds, rice] = await Promise.allSettled([
-    requestJson<unknown>(`${BACKEND_BASE}/${accessJwt ? 'pds' : 'bsky'}/xrpc/app.bsky.actor.getProfile?${params}`, { headers: authHeaders(accessJwt) }),
-    requestJson<{ data: RicePublicUser }>(`${BACKEND_BASE}/api/users/${encodeURIComponent(actor)}/profile`),
+    xrpcGet<unknown>('app.bsky.actor.getProfile', new URLSearchParams({ actor }), accessJwt),
+    backend<{ data: RicePublicUser }>(`/api/users/${encodeURIComponent(actor)}/profile`),
   ])
   const social = pds.status === 'fulfilled' ? normalizeSocialProfile(pds.value) : null
   if (rice.status === 'fulfilled') {
@@ -74,20 +59,13 @@ export async function loadSocialProfile(actor: string, accessJwt?: string) {
   throw new Error('用户资料暂时无法显示')
 }
 
-export async function loadSocialConnections(data: {
-  actor: string
-  kind: SocialConnectionKind
-  cursor?: string
-  accessJwt?: string
-}): Promise<SocialConnectionPage> {
-  const method = data.kind === 'followers' ? 'getFollowers' : 'getFollows'
-  const listKey = data.kind === 'followers' ? 'followers' : 'follows'
-  const params = new URLSearchParams({ actor: data.actor, limit: '30' })
-  if (data.cursor) params.set('cursor', data.cursor)
+type ConnectionsInput = { actor: string; kind: SocialConnectionKind; cursor?: string; accessJwt?: string }
+type FollowInput = { did: string; accessJwt: string; targetDid: string; recordUri?: string }
 
-  const body = await requestJson<Record<string, unknown>>(
-    `${BACKEND_BASE}/${data.accessJwt ? 'pds' : 'bsky'}/xrpc/app.bsky.graph.${method}?${params}`,
-    { headers: authHeaders(data.accessJwt) },
+export async function loadSocialConnections(data: ConnectionsInput): Promise<SocialConnectionPage> {
+  const [method, listKey] = data.kind === 'followers' ? ['getFollowers', 'followers'] : ['getFollows', 'follows']
+  const body = await xrpcGet<Record<string, unknown>>(
+    `app.bsky.graph.${method}`, searchParams({ actor: data.actor, limit: '30', cursor: data.cursor }), data.accessJwt,
   )
   const profiles = Array.isArray(body[listKey]) ? body[listKey] : []
   return {
@@ -97,31 +75,17 @@ export async function loadSocialConnections(data: {
   }
 }
 
-export async function updateFollowRecord(data: {
-  did: string
-  accessJwt: string
-  targetDid: string
-  recordUri?: string
-}) {
+export async function updateFollowRecord(data: FollowInput) {
   const collection = 'app.bsky.graph.follow'
   if (data.recordUri) {
-    await deletePdsRecord(data.accessJwt, {
-      repo: data.did,
-      collection,
-      rkey: recordKeyFromUri(data.recordUri, collection),
-    })
+    await deleteOwnRecord(data.accessJwt, data.did, collection, data.recordUri)
     return { recordUri: null }
   }
   if (data.did === data.targetDid) throw new Error('不能关注自己')
-
   const record = await createPdsRecord(data.accessJwt, {
     repo: data.did,
     collection,
-    record: {
-      $type: collection,
-      subject: data.targetDid,
-      createdAt: new Date().toISOString(),
-    },
+    record: { $type: collection, subject: data.targetDid, createdAt: new Date().toISOString() },
   })
   return { recordUri: record.uri }
 }
@@ -131,19 +95,9 @@ export const getSocialProfile = createServerFn({ method: 'POST' })
   .handler(({ data }) => loadSocialProfile(data.actor, data.accessJwt))
 
 export const getSocialConnections = createServerFn({ method: 'POST' })
-  .validator((data: {
-    actor: string
-    kind: SocialConnectionKind
-    cursor?: string
-    accessJwt?: string
-  }) => data)
+  .validator((data: ConnectionsInput) => data)
   .handler(({ data }) => loadSocialConnections(data))
 
 export const toggleFollow = createServerFn({ method: 'POST' })
-  .validator((data: {
-    did: string
-    accessJwt: string
-    targetDid: string
-    recordUri?: string
-  }) => data)
+  .validator((data: FollowInput) => data)
   .handler(({ data }) => updateFollowRecord(data))

@@ -3,11 +3,11 @@ import { useEffect } from 'react'
 import { ComposePanel, type ComposeInitialData, type ComposeKind } from '~/features/feed/ComposePanel'
 import { readPostDraft } from '~/features/feed/post-draft'
 import { getNodes } from '~/features/nodes/api'
-import { getTask, getTasks } from '~/features/tasks/api'
+import { getTask, getTaskPage } from '~/features/tasks/api'
 import { getEvent, getEvents } from '~/features/events/api'
 import { readStoredSession, useStoredSession } from '~/features/session/session'
+import { errorMessage } from '~/lib/util'
 
-const errorMessage = (reason: unknown, fallback: string) => reason instanceof Error ? reason.message : fallback
 export const Route = createFileRoute('/compose')({
   ssr: false,
   staleTime: 0,
@@ -25,7 +25,7 @@ export const Route = createFileRoute('/compose')({
     const [nodesResult, postDraftResult, taskResult, eventResult] = await Promise.allSettled([
       getNodes({ data: { token: deps.token, mine: 'managed' } }),
       deps.editId ? Promise.resolve(null) : readPostDraft(deps.did),
-      deps.kind === 'task' ? deps.editId ? getTask({ data: { token: deps.token, id: deps.editId } }) : getTasks({ data: { token: deps.token, mine: 'created', status: 'draft', limit: 1 } }).then(([draft]) => draft ?? null) : Promise.resolve(undefined),
+      deps.kind === 'task' ? deps.editId ? getTask({ data: { token: deps.token, id: deps.editId } }) : getTaskPage({ data: { token: deps.token, mine: 'created', status: 'draft', limit: 1 } }).then(({ data: [draft] }) => draft ?? null) : Promise.resolve(undefined),
       deps.kind === 'activity' ? deps.editId ? getEvent({ data: { token: deps.token, id: deps.editId } }) : getEvents({ data: { token: deps.token, mine: 'created', status: 'draft' } }).then((page) => page.data[0] ?? null) : Promise.resolve(undefined),
     ])
     const current = readStoredSession()

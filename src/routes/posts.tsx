@@ -6,6 +6,7 @@ import { PostThreadPanel } from '~/features/feed/PostThreadPanel'
 import { readStoredSession, useStoredSession } from '~/features/session/session'
 import { LoadingState } from '~/components/LoadingState'
 import type { PostThread } from '~/lib/models'
+import { errorMessage } from '~/lib/util'
 
 export const Route = createFileRoute('/posts')({
   ssr: false,
@@ -21,7 +22,7 @@ export const Route = createFileRoute('/posts')({
     try {
       return { thread: await loadCachedThread({ uri: deps.uri, did: deps.did ?? undefined, accessJwt: deps.token ?? undefined }), error: '' }
     } catch (reason) {
-      return { thread: null, error: reason instanceof Error ? reason.message : '帖子暂时无法显示' }
+      return { thread: null, error: errorMessage(reason, '帖子暂时无法显示') }
     }
   },
   component: PostPage,

@@ -10,17 +10,10 @@ import { businessCopy } from '~/lib/business-copy'
 import type { NotificationView, RiceSession } from '~/lib/models'
 
 import { useStoredSession } from '../session/session'
-import { LoginLink } from '../session/LoginLink'
-import {
-  getNotifications,
-  getTaskNotifications,
-  markNotificationsRead,
-  markTaskNotificationsRead,
-  NOTIFICATIONS_READ_EVENT,
-  notificationTarget,
-  type NotificationTarget,
-} from './api'
+import { SignedOutState } from '../session/LoginLink'
+import { getNotifications, getTaskNotifications, markNotificationsRead, markTaskNotificationsRead, NOTIFICATIONS_READ_EVENT, notificationTarget, type NotificationTarget } from './api'
 import { applyNotificationState, mergeNotificationRows, notificationSource, NOTIFICATION_STORAGE_PREFIX, saveNotificationState } from './local-state'
+import { errorMessage } from '~/lib/util'
 
 const reasonCopy: Record<string, { label: string; action: string }> = {
   like: { label: '点赞', action: '赞了你的帖子' },
@@ -41,6 +34,9 @@ const reasonCopy: Record<string, { label: string; action: string }> = {
   'task-result_approved': { label: '任务', action: '通过了你的成果验收' },
   'task-changes_requested': { label: '任务', action: '请你再完善一下成果' },
 }
+
+const SOURCE_LABEL = { social: '帖子互动通知', business: '任务、活动与节点通知' } as const
+const failureText = (reason: unknown) => errorMessage(reason, '请稍后重试。')
 
 export function notificationTitle(notification: NotificationView) {
   if (notification.subjectType && notification.subjectType !== 'task') return businessCopy(notification.text) || '有新的业务通知'
@@ -76,15 +72,10 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
 
   useEffect(() => {
     const refresh = () => refreshLocalState((value) => value + 1)
-    const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key === NOTIFICATION_STORAGE_PREFIX + account) refresh()
-    }
+    const onStorage = (event: StorageEvent) => { if (!event.key || event.key === NOTIFICATION_STORAGE_PREFIX + account) refresh() }
     window.addEventListener(NOTIFICATIONS_READ_EVENT, refresh)
     window.addEventListener('storage', onStorage)
-    return () => {
-      window.removeEventListener(NOTIFICATIONS_READ_EVENT, refresh)
-      window.removeEventListener('storage', onStorage)
-    }
+    return () => { window.removeEventListener(NOTIFICATIONS_READ_EVENT, refresh); window.removeEventListener('storage', onStorage) }
   }, [account])
 
   useEffect(() => {
@@ -99,45 +90,31 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
     if (!isReady) return
     const current = ++loadRequest.current
     setPaging(false)
-    if (!accessJwt || !riceToken) {
-      setRows([])
-      setCursors({ social: null, business: null })
-      setLoading(false)
-      return
-    }
+    if (!accessJwt || !riceToken) { setRows([]); setCursors({ social: null, business: null }); setLoading(false); return }
     setLoading(true)
     setLoadError('')
     setPagingError('')
-    void Promise.allSettled([
-      getNotifications({ data: { token: accessJwt } }),
-      getTaskNotifications({ data: { token: riceToken } }),
-    ])
+    void Promise.allSettled([getNotifications({ data: { token: accessJwt } }), getTaskNotifications({ data: { token: riceToken } })])
       .then(([social, tasks]) => {
         if (current !== loadRequest.current) return
 
-        const nextNotifications = [social, tasks]
-          .flatMap((result) => result.status === 'fulfilled' ? result.value.notifications : [])
-        setRows(mergeNotificationRows([], nextNotifications))
+        setRows(mergeNotificationRows([], [social, tasks].flatMap((result) => result.status === 'fulfilled' ? result.value.notifications : [])))
         setCursors({
           social: social.status === 'fulfilled' ? social.value.cursor : null,
           business: tasks.status === 'fulfilled' ? tasks.value.cursor : null,
         })
 
-        setLoadError(([
-          ['帖子互动通知', social], ['任务、活动与节点通知', tasks],
-        ] as const).flatMap(([source, result]) => result.status === 'rejected'
-          ? [`${source}暂时无法加载：${result.reason instanceof Error ? result.reason.message : '请稍后重试。'}`]
-          : []).join(' '))
+        setLoadError(([[SOURCE_LABEL.social, social], [SOURCE_LABEL.business, tasks]] as const).flatMap(([source, result]) =>
+          result.status === 'rejected' ? [`${source}暂时无法加载：${failureText(result.reason)}`] : []).join(' '))
       })
-      .finally(() => {
-        if (current === loadRequest.current) setLoading(false)
-      })
+      .finally(() => { if (current === loadRequest.current) setLoading(false) })
     return () => { loadRequest.current++ }
   }, [accessJwt, isReady, reloadKey, riceToken])
 
   const hasMore = Boolean(cursors.social || cursors.business)
+  const busy = isLoading || paging || marking || clearing
   const more = async () => {
-    if (!accessJwt || !riceToken || !hasMore || isLoading || paging || marking || clearing) return
+    if (!accessJwt || !riceToken || !hasMore || busy) return
     const current = loadRequest.current
     const sources: Array<'social' | 'business'> = (['social', 'business'] as const).filter((source) => Boolean(cursors[source]))
     setPaging(true); setPagingError('')
@@ -151,7 +128,7 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
     sources.forEach((source, index) => {
       const result = results[index]
       if (result.status === 'rejected') {
-        failures.push(`${source === 'social' ? '帖子互动通知' : '任务、活动与节点通知'}暂时无法加载更多：${result.reason instanceof Error ? result.reason.message : '请稍后重试。'}`)
+        failures.push(`${SOURCE_LABEL[source]}暂时无法加载更多：${failureText(result.reason)}`)
       } else if (result.value.cursor && result.value.cursor === cursors[source]) {
         failures.push('通知分页游标未更新，请重试。')
       } else {
@@ -166,7 +143,7 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
   }
 
   const markAll = async () => {
-    if (!accessJwt || !riceToken || isLoading || paging || marking || clearing) return
+    if (!accessJwt || !riceToken || busy) return
     const requestLifetime = lifetime.current
     setMarking(true); setReadError(''); setError('')
     const results = await Promise.allSettled([markNotificationsRead({ data: accessJwt }), markTaskNotificationsRead({ data: riceToken })])
@@ -175,7 +152,7 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
       results[notificationSource(notification) === 'social' ? 0 : 1].status === 'fulfilled'
         ? { ...notification, isRead: true } : notification))
     setReadError(results.flatMap((result, index) => result.status === 'rejected'
-      ? [`${index === 0 ? '帖子互动通知' : '任务、活动与节点通知'}未能标记已读：${result.reason instanceof Error ? result.reason.message : '请稍后重试。'}`] : []).join(' '))
+      ? [`${index === 0 ? SOURCE_LABEL.social : SOURCE_LABEL.business}未能标记已读：${failureText(result.reason)}`] : []).join(' '))
     window.dispatchEvent(new Event(NOTIFICATIONS_READ_EVENT))
     setMarking(false)
   }
@@ -189,7 +166,7 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
   }
 
   const clearAllRead = async () => {
-    if (!account || !accessJwt || !riceToken || isLoading || paging || marking || clearing) return
+    if (!account || !accessJwt || !riceToken || busy) return
     const current = lifetime.current
     setClearing(true); setClearError('')
     try {
@@ -212,7 +189,7 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
       }
       saveNotificationState(account, applyNotificationState(account, all).filter((notification) => notification.isRead), 'hidden')
     } catch (reason) {
-      if (current === lifetime.current) setClearError(`未能清除已读消息：${reason instanceof Error ? reason.message : '请稍后重试。'}`)
+      if (current === lifetime.current) setClearError(`未能清除已读消息：${failureText(reason)}`)
     } finally { if (current === lifetime.current) setClearing(false) }
   }
 
@@ -226,14 +203,7 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
   }
 
   if (isReady && !session) {
-    return (
-      <div className="page signed-out-state">
-        <Bell size={34} aria-hidden="true" />
-        <strong>登录后查看通知</strong>
-        <p>新的互动会集中显示在这里。</p>
-        <LoginLink className="primary-link">前往登录</LoginLink>
-      </div>
-    )
+    return <SignedOutState title="登录后查看通知" icon={<Bell size={34} aria-hidden="true" />}><p>新的互动会集中显示在这里。</p></SignedOutState>
   }
 
   return (
@@ -241,8 +211,8 @@ function NotificationInbox({ session, isReady }: { session: RiceSession | null; 
       <div className="business-heading notification-heading">
         <div><h1>通知</h1>{unreadCount > 0 && <span className="notification-count">{unreadCount} 条未读</span>}</div>
         <div className="notification-actions">
-          <Button label={marking ? '正在标记…' : '全部已读'} variant="ghost" isDisabled={isLoading || paging || marking || clearing || (!unreadCount && !hasMore)} clickAction={markAll} />
-          <Button label="清除已读" variant="ghost" isLoading={clearing} isDisabled={isLoading || paging || marking || clearing || (!notifications.some((notification) => notification.isRead) && !hasMore)} clickAction={clearAllRead} />
+          <Button label={marking ? '正在标记…' : '全部已读'} variant="ghost" isDisabled={busy || (!unreadCount && !hasMore)} clickAction={markAll} />
+          <Button label="清除已读" variant="ghost" isLoading={clearing} isDisabled={busy || (!notifications.some((notification) => notification.isRead) && !hasMore)} clickAction={clearAllRead} />
         </div>
       </div>
       {loadError || readError || clearError || error ? (

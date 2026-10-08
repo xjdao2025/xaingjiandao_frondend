@@ -11,44 +11,56 @@ import { useFormCloseState, type FormCloseState } from '~/lib/form-state'
 import { integerInputError } from '~/lib/integer-input'
 import type { CommunityNode } from '../nodes/api'
 import type { RiceSession } from '~/lib/models'
-import { createTask, getTask, getTasks, publishTask, updateTask } from './api'
+import { createTask, getTask, getTaskPage, publishTask, updateTask } from './api'
 import type { RiceTask } from './types'
+import { errorMessage } from '~/lib/util'
 
 const MAX_TASK_CAPACITY = 1000
 
 type ParticipationMode = 'single' | 'multiple'
+
+function taskFields(draft: RiceTask | null | undefined, nodeId: string, editing = false) {
+  const dateValue = (value?: string | null) => value ? (editing ? beijingDateTimeValue : roundedTimeValue)(value) : ''
+  const multiple = (draft?.capacity ?? 1) > 1
+  return {
+    nodeId,
+    title: draft?.title ?? '',
+    description: draft?.description ?? '',
+    organizerContact: draft?.organizer_contact ?? '',
+    requirement: draft?.requirement ?? '',
+    applicationDeadline: dateValue(draft?.application_deadline),
+    executionDeadline: dateValue(draft?.execution_deadline),
+    rewardAmount: draft ? String(draft.reward_amount) : '',
+    participationMode: (multiple ? 'multiple' : 'single') as ParticipationMode,
+    multipleCapacity: multiple ? String(draft?.capacity) : '',
+  }
+}
 
 export function TaskCreatePage({ session, nodes, initialDraft, initialError = '', editing = false, onPublished, onCloseStateChange }: { session: RiceSession; nodes: Array<Pick<CommunityNode, 'id' | 'name'>>; initialDraft?: RiceTask | null; initialError?: string; editing?: boolean; onPublished: (id: string) => void; onCloseStateChange: (state: FormCloseState) => void }) {
   const mounted = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const originalApplication = initialDraft?.application_deadline ? beijingDateTimeValue(initialDraft.application_deadline) : ''
   const originalExecution = initialDraft?.execution_deadline ? beijingDateTimeValue(initialDraft.execution_deadline) : ''
-  const [nodeId, setNodeId] = useState(initialDraft === undefined ? '' : initialDraft?.node?.id ?? nodes[0]?.id ?? '')
-  const [title, setTitle] = useState(initialDraft?.title ?? '')
-  const [description, setDescription] = useState(initialDraft?.description ?? '')
-  const [organizerContact, setOrganizerContact] = useState(initialDraft?.organizer_contact ?? '')
-  const [requirement, setRequirement] = useState(initialDraft?.requirement ?? '')
-  const [applicationDeadline, setApplicationDeadline] = useState(initialDraft?.application_deadline ? (editing ? originalApplication : roundedTimeValue(initialDraft.application_deadline)) : '')
-  const [executionDeadline, setExecutionDeadline] = useState(initialDraft?.execution_deadline ? (editing ? originalExecution : roundedTimeValue(initialDraft.execution_deadline)) : '')
-  const [rewardAmount, setRewardAmount] = useState(initialDraft ? String(initialDraft.reward_amount) : '')
-  const [participationMode, setParticipationMode] = useState<ParticipationMode>((initialDraft?.capacity ?? 1) > 1 ? 'multiple' : 'single')
-  const [multipleCapacity, setMultipleCapacity] = useState((initialDraft?.capacity ?? 1) > 1 ? String(initialDraft?.capacity) : '')
+  const [fields, setFields] = useState(() => taskFields(initialDraft, initialDraft === undefined ? '' : initialDraft?.node?.id ?? nodes[0]?.id ?? '', editing))
+  const { nodeId, title, description, organizerContact, requirement, applicationDeadline, executionDeadline, rewardAmount, participationMode, multipleCapacity } = fields
+  const set = <K extends keyof typeof fields>(key: K, value: (typeof fields)[K]) => setFields((current) => ({ ...current, [key]: value }))
   const [taskId, setTaskId] = useState<string | null>(initialDraft?.id ?? null)
   const [draftLoading, setDraftLoading] = useState(initialDraft === undefined)
   const [error, setError] = useState(initialError)
   const [notice, setNotice] = useState('')
-  const [submitting, setSubmitting] = useState<'draft' | 'open' | null>(null)
+  const [busy, setBusy] = useState(false)
   const requestId = useRef('')
   const imageSelection = useRiceImages(initialDraft?.attachments ?? [])
-  const markSaved = useFormCloseState(JSON.stringify([nodeId, title, description, organizerContact, requirement, participationMode === 'single' ? 1 : multipleCapacity, applicationDeadline, executionDeadline, rewardAmount, imageSelection.images.map(image => image.src)]), !draftLoading, !!submitting, onCloseStateChange, () => submit(editing ? 'open' : 'draft'))
+  const markSaved = useFormCloseState(JSON.stringify([nodeId, title, description, organizerContact, requirement, participationMode === 'single' ? 1 : multipleCapacity, applicationDeadline, executionDeadline, rewardAmount, imageSelection.images.map(image => image.src)]), !draftLoading, busy, onCloseStateChange, () => submit(editing ? 'open' : 'draft'))
   const restoreImages = imageSelection.restore
   useEffect(() => {
     if (initialDraft !== undefined) return
     let active = true; setDraftLoading(true)
-    void getTasks({ data: { token: session.token, mine: 'created', status: 'draft', limit: 1 } }).then(([draft]) => {
+    void getTaskPage({ data: { token: session.token, mine: 'created', status: 'draft', limit: 1 } }).then(({ data: [draft] }) => {
       if (!active) return
-      setNodeId(draft?.node?.id ?? nodes[0]?.id ?? '')
-      if (draft) { setTaskId(draft.id); restoreImages(draft.attachments ?? []); setTitle(draft.title); setDescription(draft.description); setOrganizerContact(draft.organizer_contact ?? ''); setRequirement(draft.requirement ?? ''); setParticipationMode((draft.capacity ?? 1) > 1 ? 'multiple' : 'single'); setMultipleCapacity((draft.capacity ?? 1) > 1 ? String(draft.capacity) : ''); setApplicationDeadline(draft.application_deadline ? roundedTimeValue(draft.application_deadline) : ''); setExecutionDeadline(draft.execution_deadline ? roundedTimeValue(draft.execution_deadline) : ''); setRewardAmount(String(draft.reward_amount)) }
+      const restoredNode = draft?.node?.id ?? nodes[0]?.id ?? ''
+      if (draft) { setTaskId(draft.id); restoreImages(draft.attachments ?? []); setFields(taskFields(draft, restoredNode)) }
+      else set('nodeId', restoredNode)
     }).catch((e) => { if (active) setError(e.message) }).finally(() => { if (active) setDraftLoading(false) })
     return () => { active = false }
   }, [session.token, restoreImages, nodes, initialDraft])
@@ -92,14 +104,14 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
     return null
   }
   async function submit(status: 'draft' | 'open'): Promise<boolean> {
-    if (submitting) return false
+    if (busy) return false
     if (nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '') { setError('请补齐标题、说明、交付要求和稻米数量。'); return false }
     if ((status === 'open' && !organizerContact.trim()) || organizerContact.trim().length > 256) { setError('请填写组织方联系方式，最多 256 字。'); return false }
     const inputError = capacityError ?? integerInputError(rewardAmount, rewardLabel)
     if (inputError) { setError(inputError); return false }
     const deadlineError = (status === 'open' || applicationDeadline ? validate(2) : null) ?? (status === 'open' || executionDeadline ? validate(3) : null)
     if (deadlineError) { setError(deadlineError); return false }
-    setSubmitting(status); setError(''); setNotice('')
+    setBusy(true); setError(''); setNotice('')
     if (!requestId.current) requestId.current = crypto.randomUUID()
     try {
       const attachmentIds = await imageSelection.upload(session.token)
@@ -108,7 +120,7 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
       let draftId = taskId
       if (editing && !draftId) throw new Error('未找到要编辑的任务，请重新打开详情页。')
       if (!draftId) {
-        const [saved] = await getTasks({ data: { token: session.token, mine: 'created', status: 'draft', limit: 1 } })
+        const { data: [saved] } = await getTaskPage({ data: { token: session.token, mine: 'created', status: 'draft', limit: 1 } })
         if (saved && (saved.node?.id ?? '') !== nodeId) throw new Error('已有另一节点的任务草稿。请重新打开发布页面后继续编辑。')
         draftId = saved?.id ?? null
       }
@@ -136,54 +148,54 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
       window.dispatchEvent(new Event('rice-changed'))
       onPublished(task.id)
       return true
-    } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : '任务保存失败'); return false } finally { if (mounted.current) setSubmitting(null) }
+    } catch (e) { if (mounted.current) setError(errorMessage(e, '任务保存失败')); return false } finally { if (mounted.current) setBusy(false) }
   }
-  const disabled = nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '' || !!amountError || !!capacityError || !!submitting
+  const disabled = nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '' || !!amountError || !!capacityError || busy
   const nodeName = personal ? '个人发起' : nodes.find(node => node.id === nodeId)?.name ?? '未选择'
   return <section className="form-card task-compose-form">
-    <PublishSteps busy={!!submitting} error={error} notice={notice} onError={setError} validate={validate} canSaveDraft={!disabled && !editing} onSaveDraft={() => submit('draft')} onPublish={() => submit('open')} publishLabel={editing ? '保存修改' : '发布任务'} editing={editing} steps={[
+    <PublishSteps busy={busy} error={error} notice={notice} onError={setError} validate={validate} canSaveDraft={!disabled && !editing} onSaveDraft={() => submit('draft')} onPublish={() => submit('open')} publishLabel={editing ? '保存修改' : '发布任务'} editing={editing} steps={[
       {
         label: '基本信息', title: '你想一起做什么？',
         content: <>
-          {!personal && <label className="native-field">所属节点<select required value={nodeId} disabled={(!editing && !!taskId) || rewardReadOnly || !!submitting} onChange={(e) => setNodeId(e.target.value)}>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select></label>}
-          <PublishTextInput isDisabled={!!submitting} label="任务标题" value={title} onChange={(v) => setTitle(v.slice(0, 128))} width="100%" isRequired />
-          <ContactField organizer value={organizerContact} onChange={setOrganizerContact} disabled={!!submitting} />
+          {!personal && <label className="native-field">所属节点<select required value={nodeId} disabled={(!editing && !!taskId) || rewardReadOnly || busy} onChange={(e) => set('nodeId', e.target.value)}>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select></label>}
+          <PublishTextInput isDisabled={busy} label="任务标题" value={title} onChange={(v) => set('title', v.slice(0, 128))} width="100%" isRequired />
+          <ContactField organizer value={organizerContact} onChange={(v) => set('organizerContact', v)} disabled={busy} />
         </>,
         review: <dl className="publish-review-fields"><div><dt>所属节点</dt><dd>{nodeName}</dd></div><div><dt>任务标题</dt><dd>{title}</dd></div><div><dt>组织方联系方式</dt><dd>{organizerContact.trim() || '未填写'}</dd></div></dl>,
       },
       {
         label: '内容', title: '把这件事说清楚。',
         content: <>
-          <PublishTextArea isDisabled={!!submitting} label="任务说明" value={description} onChange={setDescription} maxLength={4000} width="100%" isRequired />
-          <PublishTextArea isDisabled={!!submitting} label="交付要求" value={requirement} onChange={setRequirement} maxLength={4000} width="100%" isRequired />
+          <PublishTextArea isDisabled={busy} label="任务说明" value={description} onChange={(v) => set('description', v)} maxLength={4000} width="100%" isRequired />
+          <PublishTextArea isDisabled={busy} label="交付要求" value={requirement} onChange={(v) => set('requirement', v)} maxLength={4000} width="100%" isRequired />
           <label className="native-field">承接方式
-            <select aria-describedby="task-participation-help" value={participationMode} disabled={rewardReadOnly || !!submitting} onChange={event => { setParticipationMode(event.target.value as ParticipationMode); setError(''); setNotice('') }}>
+            <select aria-describedby="task-participation-help" value={participationMode} disabled={rewardReadOnly || busy} onChange={event => { set('participationMode', event.target.value as ParticipationMode); setError(''); setNotice('') }}>
               <option value="single">单人任务</option><option value="multiple">多人任务</option>
             </select>
           </label>
           <p id="task-participation-help" className="publish-guidance">复杂任务或只需一人承接，选择单人任务；简单且需多人分别完成，选择多人任务。多人任务需填写人数上限，每人独立交付和验收，稻米激励按第五步填写的每人数额发放。</p>
-          {multiple && <PublishTextInput isDisabled={rewardReadOnly || !!submitting} label="承接人数上限" value={multipleCapacity} onChange={value => { setMultipleCapacity(value); setError(''); setNotice('') }} status={multipleCapacity.trim() && capacityError ? { type: 'error', message: capacityError } : undefined} width="100%" isRequired />}
-          <ImagePicker images={imageSelection.images} onSelect={imageSelection.select} onRemove={imageSelection.remove} disabled={!!submitting} />
+          {multiple && <PublishTextInput isDisabled={rewardReadOnly || busy} label="承接人数上限" value={multipleCapacity} onChange={value => { set('multipleCapacity', value); setError(''); setNotice('') }} status={multipleCapacity.trim() && capacityError ? { type: 'error', message: capacityError } : undefined} width="100%" isRequired />}
+          <ImagePicker images={imageSelection.images} onSelect={imageSelection.select} onRemove={imageSelection.remove} disabled={busy} />
         </>,
         review: <><dl className="publish-review-fields"><div><dt>任务说明</dt><dd className="publish-review-text">{description}</dd></div><div><dt>交付要求</dt><dd className="publish-review-text">{requirement}</dd></div><div><dt>承接方式</dt><dd>{participationMode === 'single' ? '单人任务' : `多人任务，最多 ${multipleCapacity} 人`}</dd></div><div><dt>参考图片</dt><dd>{imageSelection.images.length ? `${imageSelection.images.length} 张` : '未添加'}</dd></div></dl><ImageGroup images={imageSelection.images} /></>,
       },
       {
         label: '申请截止', title: '什么时候截止申请？',
-        content: <PublishSchedule disabled={!!submitting} fields={[
-          { label: '申请截止', value: applicationDeadline, min: editing && !reopening ? undefined : nextTimeSlot(), required: true, onChange: value => { setApplicationDeadline(value); if (value && executionDeadline && executionDeadline <= value) setExecutionDeadline(addMinutes(value, 15)); setError('') } },
+        content: <PublishSchedule disabled={busy} fields={[
+          { label: '申请截止', value: applicationDeadline, min: editing && !reopening ? undefined : nextTimeSlot(), required: true, onChange: value => { set('applicationDeadline', value); if (value && executionDeadline && executionDeadline <= value) set('executionDeadline', addMinutes(value, 15)); setError('') } },
         ]} />,
         review: <dl className="publish-review-fields"><div><dt>申请截止</dt><dd>{applicationDeadline ? `${applicationDeadline.replace('T', ' ')}（北京时间）` : '未设置'}</dd></div></dl>,
       },
       {
         label: '最晚交成果', title: '最晚哪天交成果？',
-        content: <PublishSchedule disabled={!!submitting} fields={[
-          { label: '最晚交成果', value: executionDeadline, min: editing && !reopening ? undefined : applicationDeadline ? addMinutes(applicationDeadline, 15) : nextTimeSlot(), required: true, onChange: value => { setExecutionDeadline(value); setError('') } },
+        content: <PublishSchedule disabled={busy} fields={[
+          { label: '最晚交成果', value: executionDeadline, min: editing && !reopening ? undefined : applicationDeadline ? addMinutes(applicationDeadline, 15) : nextTimeSlot(), required: true, onChange: value => { set('executionDeadline', value); setError('') } },
         ]} />,
         review: <dl className="publish-review-fields"><div><dt>最晚交成果</dt><dd>{executionDeadline ? `${executionDeadline.replace('T', ' ')}（北京时间）` : '未设置'}</dd></div></dl>,
       },
       {
         label: '参与与稻米', title: multiple ? '给每位承接者多少稻米？' : '给多少稻米？',
-        content: <><PublishTextInput isDisabled={!!submitting} isReadOnly={rewardReadOnly} label={`${rewardLabel}（测试稻米）`} value={rewardAmount} onChange={v => { setRewardAmount(v); setError(''); setNotice('') }} status={amountError ? { type: 'error', message: amountError } : undefined} width="100%" isRequired />{totalRewardAmount !== null && <p className={multiple ? 'publish-total' : 'muted'}>总冻结：{totalRewardCopy}</p>}<p className="muted">{fundingCopy}</p></>,
+        content: <><PublishTextInput isDisabled={busy} isReadOnly={rewardReadOnly} label={`${rewardLabel}（测试稻米）`} value={rewardAmount} onChange={v => { set('rewardAmount', v); setError(''); setNotice('') }} status={amountError ? { type: 'error', message: amountError } : undefined} width="100%" isRequired />{totalRewardAmount !== null && <p className={multiple ? 'publish-total' : 'muted'}>总冻结：{totalRewardCopy}</p>}<p className="muted">{fundingCopy}</p></>,
         review: <dl className="publish-review-fields">{multiple && <div><dt>承接人数上限</dt><dd>{capacity} 人</dd></div>}<div><dt>{rewardLabel}</dt><dd>{rewardAmount} 测试稻米</dd></div><div><dt>总冻结</dt><dd>{totalRewardCopy}</dd></div><div><dt>稻米从哪出</dt><dd>{personal ? fundingCopy : `${nodeName}：${fundingCopy}`}</dd></div></dl>,
       },
     ]} />

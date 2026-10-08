@@ -1,23 +1,13 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { BACKEND_BASE, readJson, requestJson } from '~/lib/http'
+import { BACKEND_BASE, backend, backendData, readJson } from '~/lib/http'
 import type { RiceAttachment, RiceSession, RiceUser } from '~/lib/models'
 import { isRiceSession } from '../session/session-data'
 
 export type VerificationChannel = 'sms' | 'email'
-export type VerificationPurpose =
-  | 'register'
-  | 'reset_password'
-  | 'modify_phone'
-  | 'modify_email'
-  | 'delete_account'
+export type VerificationPurpose = 'register' | 'reset_password' | 'modify_phone' | 'modify_email' | 'delete_account'
 
-type ContactInput = {
-  channel: VerificationChannel
-  phone?: string
-  phoneRegion?: string
-  email?: string
-}
+type ContactInput = { channel: VerificationChannel; phone?: string; phoneRegion?: string; email?: string }
 
 const contactBody = (data: ContactInput) => data.channel === 'sms'
   ? { phone: data.phone?.trim(), phone_region: data.phoneRegion || '86' }
@@ -46,17 +36,9 @@ export async function requestVerificationCode(data: ContactInput & { purpose: Ve
 
 export const verifyRegistration = createServerFn({ method: 'POST' })
   .validator((data: ContactInput & { code: string }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: { ticket: string; expires_in: number } }>(
-      `${BACKEND_BASE}/api/registrations/verification`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel: data.channel, ...contactBody(data), code: data.code.trim() }),
-      },
-    )
-    return body.data
-  })
+  .handler(async ({ data }) => backendData<{ ticket: string; expires_in: number }>('/api/registrations/verification', {
+    method: 'POST', json: { channel: data.channel, ...contactBody(data), code: data.code.trim() },
+  }))
 
 type RegistrationInput = { ticket: string; username: string; password: string }
 
@@ -70,17 +52,12 @@ export function registrationUsernameError(username: unknown) {
 export async function requestRegistration(data: RegistrationInput) {
   const error = registrationUsernameError(data.username)
   if (error) throw new Error(error)
-  const body = await requestJson<{ data: RiceSession }>(`${BACKEND_BASE}/api/registrations`, {
+  const session = await backendData<RiceSession>('/api/registrations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ticket: data.ticket,
-      username: data.username.trim().toLowerCase(),
-      password: data.password,
-    }),
+    json: { ticket: data.ticket, username: data.username.trim().toLowerCase(), password: data.password },
   })
-  if (!isRiceSession(body.data)) throw new Error('登录信息返回异常，请稍后重试。')
-  return body.data
+  if (!isRiceSession(session)) throw new Error('登录信息返回异常，请稍后重试。')
+  return session
 }
 
 export const registerRice = createServerFn({ method: 'POST' })
@@ -90,81 +67,41 @@ export const registerRice = createServerFn({ method: 'POST' })
 export const resetRicePassword = createServerFn({ method: 'POST' })
   .validator((data: ContactInput & { code: string; password: string }) => data)
   .handler(async ({ data }) => {
-    await requestJson(`${BACKEND_BASE}/api/passwords/reset`, {
+    await backend('/api/passwords/reset', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        channel: data.channel,
-        ...contactBody(data),
-        code: data.code.trim(),
-        password: data.password,
-      }),
+      json: { channel: data.channel, ...contactBody(data), code: data.code.trim(), password: data.password },
     })
     return true
   })
 
 export const updateCurrentUser = createServerFn({ method: 'POST' })
-  .validator((data: {
-    token: string
-    nickname: string
-    bio: string
-    avatarId?: string
-  }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceUser }>(`${BACKEND_BASE}/api/users/me`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nickname: data.nickname,
-        bio: data.bio,
-        ...(data.avatarId ? { avatar_id: data.avatarId } : {}),
-      }),
-    })
-    return body.data
-  })
+  .validator((data: { token: string; nickname: string; bio: string; avatarId?: string }) => data)
+  .handler(async ({ data }) => backendData<RiceUser>('/api/users/me', {
+    method: 'PATCH',
+    token: data.token,
+    json: { nickname: data.nickname, bio: data.bio, ...(data.avatarId ? { avatar_id: data.avatarId } : {}) },
+  }))
 
 export const uploadRiceAttachment = createServerFn({ method: 'POST' })
-  .validator((data: {
-    token: string
-    filename: string
-    contentType: string
-    base64: string
-  }) => data)
-  .handler(async ({ data }) => {
+  .validator((data: { token: string; filename: string; contentType: string; base64: string }) => data)
+  .handler(({ data }) => {
     const form = new FormData()
     form.append('kind', 'image')
-    form.append(
-      'file',
-      new Blob([Buffer.from(data.base64, 'base64')], { type: data.contentType }),
-      data.filename,
-    )
-    const body = await requestJson<{ data: RiceAttachment }>(`${BACKEND_BASE}/api/attachments`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${data.token}` },
-      body: form,
-    })
-    return body.data
+    form.append('file', new Blob([Buffer.from(data.base64, 'base64')], { type: data.contentType }), data.filename)
+    return backendData<RiceAttachment>('/api/attachments', { method: 'POST', token: data.token, body: form })
   })
 
 export const changeCurrentUserContact = createServerFn({ method: 'POST' })
   .validator((data: ContactInput & { token: string; code: string }) => data)
-  .handler(async ({ data }) => {
-    const kind = data.channel === 'sms' ? 'phone' : 'email'
-    const body = await requestJson<{ data: RiceUser }>(`${BACKEND_BASE}/api/users/me/${kind}`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...contactBody(data), code: data.code.trim() }),
-    })
-    return body.data
-  })
+  .handler(async ({ data }) => backendData<RiceUser>(`/api/users/me/${data.channel === 'sms' ? 'phone' : 'email'}`, {
+    method: 'PUT', token: data.token, json: { ...contactBody(data), code: data.code.trim() },
+  }))
 
 export const deleteCurrentUser = createServerFn({ method: 'POST' })
   .validator((data: { token: string; channel: VerificationChannel; code: string }) => data)
   .handler(async ({ data }) => {
-    await requestJson(`${BACKEND_BASE}/api/users/me`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: data.channel, code: data.code.trim() }),
+    await backend('/api/users/me', {
+      method: 'DELETE', token: data.token, json: { channel: data.channel, code: data.code.trim() },
     })
     return true
   })

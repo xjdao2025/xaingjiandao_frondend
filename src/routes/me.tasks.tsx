@@ -4,6 +4,8 @@ import { MyTasksPage } from '~/features/tasks/MyTasksPage'
 import { getTaskPage } from '~/features/tasks/api'
 import type { RiceTask, TaskMine } from '~/features/tasks/types'
 import { readStoredSession } from '~/features/session/session'
+import { errorMessage, mergeBy } from '~/lib/util'
+import { isStoredSession } from './-loaders'
 
 export type MyTasksInitialData = { accountId: string; sessionToken: string; tasks: RiceTask[] }
 
@@ -23,10 +25,7 @@ export const Route = createFileRoute('/me/tasks')({
     const empty = { initialData: null, error: '' }
     const { accountId, token } = deps
     if (!accountId || !token) return empty
-    const sameSession = () => {
-      const current = readStoredSession()
-      return current?.user.id === accountId && current.token === token
-    }
+    const sameSession = () => isStoredSession(accountId, token)
     if (!sameSession()) return empty
     try {
       const mine: TaskMine[] = ['managed', 'applied', 'assigned']
@@ -37,11 +36,11 @@ export const Route = createFileRoute('/me/tasks')({
         return rows
       }))
       if (!sameSession()) return empty
-      return { initialData: { accountId, sessionToken: token, tasks: [...new Map(groups.flat().map((task) => [task.id, task])).values()] }, error: '' }
+      return { initialData: { accountId, sessionToken: token, tasks: mergeBy(groups.flat(), (task) => task.id) }, error: '' }
     } catch (reason) {
       if (!sameSession()) return empty
       const previous = context.previousData
-      return { initialData: previous?.accountId === accountId && previous.sessionToken === token ? previous : null, error: reason instanceof Error ? reason.message : '任务暂时无法加载，请稍后重试。' }
+      return { initialData: previous?.accountId === accountId && previous.sessionToken === token ? previous : null, error: errorMessage(reason, '任务暂时无法加载，请稍后重试。') }
     }
   } },
   component: MyTasksRoute,

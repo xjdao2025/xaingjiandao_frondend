@@ -18,6 +18,7 @@ import { TaskCreatePage } from '../tasks/TaskCreatePage'
 import { useStoredSession } from '../session/session'
 import { createTextPost, createdPostView, prependCachedPost, uploadPostImage } from './api'
 import { deletePostDraft, readPostDraft, savePostDraft, type PostDraft } from './post-draft'
+import { errorMessage } from '~/lib/util'
 
 export type ComposeKind = 'post' | 'activity' | 'task'
 const composeKinds: Array<{ value: ComposeKind; label: string }> = [{ value: 'post', label: '发帖' }, { value: 'task', label: '发任务' }, { value: 'activity', label: '发活动' }]
@@ -66,7 +67,7 @@ function ComposeContent({ initialKind = 'post', editId, initialData }: ComposePa
         if (!active) return
         setManagedNodes([])
         setKind('post')
-        setError(reason instanceof Error ? reason.message : '暂时无法加载发布选项')
+        setError(errorMessage(reason, '暂时无法加载发布选项'))
       })
     return () => { active = false }
   }, [session?.token])
@@ -142,7 +143,7 @@ function ComposeContent({ initialKind = 'post', editId, initialData }: ComposePa
       }
       if (mounted.current) finishClose(true)
     } catch (reason) {
-      if (mounted.current) setCloseError(reason instanceof Error ? reason.message : '草稿保存失败，内容仍保留在页面中，请重试。')
+      if (mounted.current) setCloseError(errorMessage(reason, '草稿保存失败，内容仍保留在页面中，请重试。'))
     } finally { if (mounted.current) setSavingDrafts(false) }
   }
   const published = async (publishedKind: ComposeKind, itemId?: string) => {
@@ -192,7 +193,7 @@ function ComposeContent({ initialKind = 'post', editId, initialData }: ComposePa
       window.dispatchEvent(new Event('posts-changed'))
       setText(''); setFiles([]); setSavedPost({ text: '', files: [] }); setPostDraftStored(false); uploadedImages.current.clear(); postRequest.current = null
       await published('post')
-    } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : '发布失败') } finally { if (mounted.current) setBusy(false) }
+    } catch (e) { if (mounted.current) setError(errorMessage(e, '发布失败')) } finally { if (mounted.current) setBusy(false) }
   }
   if (!isReady) return <LoadingState label="正在加载…" />
   if (!session) return <LoginPage />

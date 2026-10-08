@@ -5,6 +5,8 @@ import { getCurrentUser } from '~/features/session/api'
 import { readStoredSession, writeStoredSession } from '~/features/session/session'
 import { getWallet } from '~/features/grains/api'
 import { getNodes } from '~/features/nodes/api'
+import { errorMessage } from '~/lib/util'
+import { isStoredSession } from './-loaders'
 
 export const Route = createFileRoute('/me/')({
   ssr: false,
@@ -23,10 +25,7 @@ export const Route = createFileRoute('/me/')({
     const empty = { initialData: null, error: '' }
     const { token, accountId } = deps
     if (!token || !accountId) return empty
-    const isCurrentSession = () => {
-      const current = readStoredSession()
-      return current?.user.id === accountId && current.token === token
-    }
+    const isCurrentSession = () => isStoredSession(accountId, token)
     if (!isCurrentSession()) return empty
     const communitiesRequest = getNodes({ data: { token, mine: 'managed' } })
       .then(async (nodes) => ({
@@ -54,7 +53,7 @@ export const Route = createFileRoute('/me/')({
       const previous = context.previousData
       // Keep personal data on refresh failures, but never restore old community permissions.
       const initialData = previous?.accountId === accountId && previous.sessionToken === token ? { ...previous, communityError: undefined, ...communities } : null
-      return { initialData, error: error instanceof TypeError ? '网络连接失败，请检查网络后重试。' : error instanceof Error ? error.message : '个人资料暂时无法加载，请稍后重试。' }
+      return { initialData, error: error instanceof TypeError ? '网络连接失败，请检查网络后重试。' : errorMessage(error, '个人资料暂时无法加载，请稍后重试。') }
     }
   } },
   component: () => { const { initialData, error } = Route.useLoaderData(); return <ProfilePage initialData={initialData} initialError={error} /> },

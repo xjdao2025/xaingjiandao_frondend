@@ -6,34 +6,23 @@ import { useState } from 'react'
 import { ContentCardHeader } from '~/components/ContentCardHeader'
 import { ImageGroup } from '~/components/ContentImages'
 import { PostText } from '~/components/PostText'
-import { PostActions, type RepostChange } from '~/components/PostActions'
+import { PostActions, type PostActionsProps } from '~/components/PostActions'
 import { isPostHidden, rememberPost } from '~/features/feed/api'
 import { useStoredSession } from '~/features/session/session'
 import { postCategory, postDisplayText } from '~/features/feed/tags'
 import { authorDisplayName, formatTimestamp } from '~/lib/format'
 import type { PostView } from '~/lib/models'
 
-export function PostList({
-  posts,
-  onRepostChange,
-  onPostDeleted,
-}: {
-  posts: PostView[]
-  onRepostChange?: (change: RepostChange) => void
-  onPostDeleted?: (uri: string) => void
-}) {
+type PostCallbacks = Pick<PostActionsProps, 'onRepostChange' | 'onPostDeleted'>
+
+export function PostList({ posts, onRepostChange, onPostDeleted }: PostCallbacks & { posts: PostView[] }) {
   const [deletedUris, setDeletedUris] = useState(() => new Set<string>())
-  const visiblePosts = posts.filter(
-    (post) => !deletedUris.has(post.uri) && !isPostHidden(post.uri),
-  )
+  const visiblePosts = posts.filter((post) => !deletedUris.has(post.uri) && !isPostHidden(post.uri))
 
   if (visiblePosts.length === 0) {
     return (
       <div className="empty-panel">
-        <EmptyState
-          title="这里还没有帖子"
-          description="分享见闻、想法和近况，让伙伴们看到。"
-        />
+        <EmptyState title="这里还没有帖子" description="分享见闻、想法和近况，让伙伴们看到。" />
       </div>
     )
   }
@@ -55,21 +44,8 @@ export function PostList({
   )
 }
 
-export function PostCard({
-  post,
-  detail = false,
-  commentCount,
-  onOpenComments,
-  onRepostChange,
-  onPostDeleted,
-}: {
-  post: PostView
-  detail?: boolean
-  commentCount?: number
-  onOpenComments?: () => void
-  onRepostChange?: (change: RepostChange) => void
-  onPostDeleted?: (uri: string) => void
-}) {
+export function PostCard({ post, detail = false, commentCount, onOpenComments, onRepostChange, onPostDeleted }:
+  Pick<PostActionsProps, 'post' | 'commentCount' | 'onOpenComments' | 'onRepostChange' | 'onPostDeleted'> & { detail?: boolean }) {
   const navigate = useNavigate()
   const { session } = useStoredSession()
   const category = postCategory(post.record)
@@ -92,20 +68,15 @@ export function PostCard({
           转发了
         </div>
       ) : null}
-      <ContentCardHeader
-        name={authorDisplayName(post.author)}
-        timestamp={formatTimestamp(post.record.createdAt || post.indexedAt)}
-        profileActor={post.author.did}
-        avatarUrl={post.author.avatar}
-      />
+      <ContentCardHeader name={authorDisplayName(post.author)} timestamp={formatTimestamp(post.record.createdAt || post.indexedAt)}
+        profileActor={post.author.did} avatarUrl={post.author.avatar} />
       <p
         className={`post-copy${detail ? '' : ' post-copy-link'}`}
         role={detail ? undefined : 'link'}
         tabIndex={detail ? undefined : 0}
         onClick={detail ? undefined : openPost}
         onKeyDown={(event) => {
-          if (detail) return
-          if (event.target !== event.currentTarget) return
+          if (detail || event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
             openPost()
@@ -115,13 +86,7 @@ export function PostCard({
         <PostText text={postDisplayText(post.record.text, category)} />
       </p>
       {post.images?.length ? <ImageGroup images={post.images} className="post-image-grid" /> : null}
-      <PostActions
-        post={post}
-        commentCount={commentCount}
-        onOpenComments={onOpenComments}
-        onRepostChange={onRepostChange}
-        onPostDeleted={onPostDeleted}
-      />
+      <PostActions post={post} commentCount={commentCount} onOpenComments={onOpenComments} onRepostChange={onRepostChange} onPostDeleted={onPostDeleted} />
     </article>
   )
 }

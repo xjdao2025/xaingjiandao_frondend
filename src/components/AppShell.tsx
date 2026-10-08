@@ -2,16 +2,22 @@ import { Link, useCanGoBack, useRouter, useRouterState } from '@tanstack/react-r
 import { ArrowLeft, Bell, Search } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-import {
-  getNotifications,
-  getTaskNotifications,
-  NOTIFICATIONS_READ_EVENT,
-} from '~/features/notifications/api'
+import { getNotifications, getTaskNotifications, NOTIFICATIONS_READ_EVENT } from '~/features/notifications/api'
 import { applyNotificationState, NOTIFICATION_STORAGE_PREFIX } from '~/features/notifications/local-state'
 import { loginReturnTo } from '~/features/session/login-redirect'
 import { LoadingProgress } from './LoadingProgress'
 import { LoadingState } from './LoadingState'
 import { useStoredSession } from '~/features/session/session'
+
+const isAccountRoute = (match: { routeId: string }) => match.routeId === '/me/' || match.routeId === '/me/tasks'
+
+const BOTTOM_NAV = [
+  { to: '/', label: '广场', isActive: (pathname: string) => pathname === '/' },
+  { to: '/tasks', label: '任务', isActive: (pathname: string) => pathname.startsWith('/tasks') },
+  { to: '/events', label: '活动', isActive: (pathname: string) => pathname.startsWith('/events') },
+  { to: '/alliance', label: '乡建', isActive: (pathname: string) => pathname.startsWith('/alliance') || pathname.startsWith('/nodes/') },
+  { to: '/me', label: '我的', isActive: (pathname: string) => pathname.startsWith('/me') },
+] as const
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter()
@@ -31,8 +37,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!isReady) return
     const previous = previousSession.current
     if (previous && (previous.accountId !== session?.user.id || previous.token !== session?.token)) {
-      router.clearCache({ filter: (match) => match.routeId === '/me/' || match.routeId === '/me/tasks' })
-      void router.invalidate({ filter: (match) => match.routeId === '/me/' || match.routeId === '/me/tasks' })
+      router.clearCache({ filter: isAccountRoute })
+      void router.invalidate({ filter: isAccountRoute })
     }
     previousSession.current = { accountId: session?.user.id, token: session?.token }
   }, [router, isReady, session?.user.id, session?.token])
@@ -64,10 +70,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isReady || !isMainPage) return
-    if (!session) {
-      setHasUnreadNotifications(false)
-      return
-    }
+    if (!session) { setHasUnreadNotifications(false); return }
 
     let active = true
     const refresh = async () => {
@@ -77,13 +80,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       ])
       if (!active) return
 
-      const hasUnread = results.some(
-        (result) =>
-          result.status === 'fulfilled' && applyNotificationState(session.pds.did, result.value.notifications).some((item) => !item.isRead),
-      )
-      if (hasUnread || results.every((result) => result.status === 'fulfilled')) {
-        setHasUnreadNotifications(hasUnread)
-      }
+      const hasUnread = results.some((result) =>
+        result.status === 'fulfilled' && applyNotificationState(session.pds.did, result.value.notifications).some((item) => !item.isRead))
+      if (hasUnread || results.every((result) => result.status === 'fulfilled')) setHasUnreadNotifications(hasUnread)
     }
     const storageChanged = (event: StorageEvent) => {
       if (!event.key || event.key === `${NOTIFICATION_STORAGE_PREFIX}${session.pds.did}`) void refresh()
@@ -122,25 +121,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       {navigating && <LoadingProgress label="正在加载页面…" />}
 
       <nav className="bottom-nav" aria-label="主要导航">
-        <Link to="/" activeProps={{}} className={`bottom-link${pathname === '/' ? ' active' : ''}`}>
-          广场
-        </Link>
-        <Link
-          to="/tasks"
-          activeProps={{}}
-          className={`bottom-link${pathname.startsWith('/tasks') ? ' active' : ''}`}
-        >
-          任务
-        </Link>
-        <Link to="/events" activeProps={{}} className={`bottom-link${pathname.startsWith('/events') ? ' active' : ''}`}>活动</Link>
-        <Link to="/alliance" activeProps={{}} className={`bottom-link${pathname.startsWith('/alliance') || pathname.startsWith('/nodes/') ? ' active' : ''}`}>乡建</Link>
-        <Link
-          to="/me"
-          activeProps={{}}
-          className={`bottom-link${pathname.startsWith('/me') ? ' active' : ''}`}
-        >
-          我的
-        </Link>
+        {BOTTOM_NAV.map((item) => (
+          <Link key={item.to} to={item.to} activeProps={{}} className={`bottom-link${item.isActive(pathname) ? ' active' : ''}`}>{item.label}</Link>
+        ))}
       </nav>
     </div>
   )

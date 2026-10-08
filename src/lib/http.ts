@@ -67,21 +67,60 @@ export async function readJson(response: Response) {
   )
 }
 
-export async function requestJson<T>(
-  input: string | URL,
-  init?: RequestInit,
+/** fetch with a deadline, mapping timeouts and network failures to user-facing errors. */
+export async function fetchWithTimeout<T>(
+  input: string | URL | Request,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  read: (response: Response) => T | Promise<T>,
 ): Promise<T> {
-  const timeout = AbortSignal.timeout(
-    init?.body && typeof init.body !== 'string' ? UPLOAD_REQUEST_TIMEOUT_MS : JSON_REQUEST_TIMEOUT_MS,
-  )
+  const timeout = AbortSignal.timeout(timeoutMs)
   const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
   try {
-    const response = await fetch(input, { ...init, signal })
-    return (await readJson(response)) as T
+    return await read(await fetch(input, { ...init, signal }))
   } catch (error) {
     init?.signal?.throwIfAborted()
     if (timeout.aborted) throw new Error('请求超时，请稍后重试。')
     if (error instanceof TypeError) throw new Error('网络连接失败，请检查网络后重试。')
     throw error
   }
+}
+
+export function requestJson<T>(input: string | URL, init?: RequestInit): Promise<T> {
+  const timeoutMs = init?.body && typeof init.body !== 'string' ? UPLOAD_REQUEST_TIMEOUT_MS : JSON_REQUEST_TIMEOUT_MS
+  return fetchWithTimeout(input, init, timeoutMs, async (response) => (await readJson(response)) as T)
+}
+
+export const bearer = (token?: string) => token ? { Authorization: `Bearer ${token}` } : undefined
+
+export type BackendInit = Omit<RequestInit, 'headers'> & { token?: string; json?: unknown; headers?: Record<string, string> }
+
+/** Calls the rice backend; `json` becomes the body, and headers stay undefined when none apply. */
+export function backend<T = JsonObject>(path: string, { token, json, headers, ...init }: BackendInit = {}) {
+  const merged = { ...bearer(token), ...(json === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers }
+  return requestJson<T>(`${BACKEND_BASE}${path}`, {
+    ...init,
+    headers: Object.keys(merged).length ? merged : undefined,
+    ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+  })
+}
+
+export async function backendData<T>(path: string, init?: BackendInit) {
+  return (await backend<{ data: T }>(path, init)).data
+}
+
+type QueryValue = string | number | boolean | null | undefined
+
+/** Builds query params in key order, skipping undefined, null, false and empty strings (but not 0). */
+export function searchParams(entries: Record<string, QueryValue>) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(entries)) {
+    if (value !== undefined && value !== null && value !== false && value !== '') query.set(key, String(value))
+  }
+  return query
+}
+
+export function withQuery(path: string, entries: Record<string, QueryValue>) {
+  const query = searchParams(entries)
+  return query.size ? `${path}?${query}` : path
 }

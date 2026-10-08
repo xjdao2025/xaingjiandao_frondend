@@ -1,8 +1,8 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { BACKEND_BASE, isSessionAuthError, requestJson } from '~/lib/http'
+import { backend, isSessionAuthError, searchParams } from '~/lib/http'
 import type { PdsImage, PostCategory, PostFeed, PostImage, PostThread, PostView, RicePublicUser, RiceSession } from '~/lib/models'
-import { appviewImageUrl, createPdsRecord, deletePdsRecord, MAX_POST_IMAGE_BYTES, MAX_POST_IMAGES, MAX_POST_TEXT_LENGTH, pdsBlobUrl, POST_IMAGE_TYPES, recordKeyFromUri, uploadPdsImage } from '~/lib/pds'
+import { appviewImageUrl, createPdsRecord, deleteOwnRecord, MAX_POST_IMAGE_BYTES, MAX_POST_IMAGES, MAX_POST_TEXT_LENGTH, pdsBlobUrl, pdsGet, POST_IMAGE_TYPES, uploadPdsImage, xrpcGet } from '~/lib/pds'
 
 import { hasPostTag, postCategory } from './tags'
 
@@ -57,38 +57,31 @@ export function readRememberedPost(uri: string, did?: string) {
     : null
 }
 
+/** Rebuilds this reader's cached plaza with `posts(current)`; returns false when it isn't cached. */
+function updateCachedPosts(did: string | undefined, posts: (current: PostView[]) => PostView[]) {
+  if (clientFeedCache?.owner !== (did ?? null)) return false
+  clientFeedCache = { owner: did ?? null, feed: { ...clientFeedCache.feed, posts: posts(clientFeedCache.feed.posts) } }
+  return true
+}
+
+const deleteThreads = (matches: (key: string) => boolean) => {
+  for (const key of clientThreadCache.keys()) if (matches(key)) clientThreadCache.delete(key)
+}
+
 export function prependCachedPost(post: PostView, did?: string) {
   if (typeof window === 'undefined') return
-  if (clientFeedCache?.owner !== (did ?? null)) {
+  if (!updateCachedPosts(did, (posts) => [post, ...posts.filter((item) => item.uri !== post.uri)])) {
     // Publishing from another page must not depend on having opened the plaza.
     clientFeedCache = { owner: did ?? null, feed: { posts: [post], cursor: '1' } }
-    return
-  }
-
-  const posts = [post, ...clientFeedCache.feed.posts.filter((item) => item.uri !== post.uri)]
-  clientFeedCache = {
-    owner: did ?? null,
-    feed: { ...clientFeedCache.feed, posts },
   }
 }
 
 export function hideDeletedPost(uri: string, did?: string) {
   if (typeof window === 'undefined') return
   clientDeletedPostUris.add(uri)
-  for (const key of clientThreadCache.keys()) {
-    if (key.endsWith(`\0${uri}`)) clientThreadCache.delete(key)
-  }
+  deleteThreads((key) => key.endsWith(`\0${uri}`))
   if (clientSelectedPost?.post.uri === uri) clientSelectedPost = null
-
-  if (clientFeedCache?.owner === (did ?? null)) {
-    clientFeedCache = {
-      owner: did ?? null,
-      feed: {
-        ...clientFeedCache.feed,
-        posts: clientFeedCache.feed.posts.filter((post) => post.uri !== uri),
-      },
-    }
-  }
+  updateCachedPosts(did, (posts) => posts.filter((post) => post.uri !== uri))
 }
 
 export function isPostHidden(uri: string) {
@@ -96,15 +89,8 @@ export function isPostHidden(uri: string) {
 }
 
 export function clearCachedFeed(did?: string) {
-  for (const key of clientThreadCache.keys()) {
-    if (key.startsWith(`${did ?? ''}\0`)) clientThreadCache.delete(key)
-  }
-  if (
-    typeof window !== 'undefined' &&
-    clientFeedCache?.owner === (did ?? null)
-  ) {
-    clientFeedCache = null
-  }
+  deleteThreads((key) => key.startsWith(`${did ?? ''}\0`))
+  if (typeof window !== 'undefined' && clientFeedCache?.owner === (did ?? null)) clientFeedCache = null
 }
 
 function postImageEmbed(images: PdsImage[]) {
@@ -112,14 +98,7 @@ function postImageEmbed(images: PdsImage[]) {
 }
 
 export function createdPostView(
-  created: {
-    uri: string
-    cid: string
-    text: string
-    createdAt: string
-    category?: PostCategory
-    images?: PdsImage[]
-  },
+  created: Pick<CreatedPost, 'uri' | 'cid' | 'text' | 'createdAt'> & { category?: PostCategory; images?: PdsImage[] },
   session: RiceSession,
   reply?: PostView['record']['reply'],
 ): PostView {
@@ -156,11 +135,7 @@ export function ownedInteractionUri(uri: string | undefined, did: string, collec
   return /^[a-zA-Z0-9._~:-]+$/.test(key) && key !== '.' && key !== '..' ? uri : undefined
 }
 
-async function hydrateViewerRecords(
-  posts: PostView[],
-  did?: string,
-  accessJwt?: string,
-) {
+async function hydrateViewerRecords(posts: PostView[], did?: string, accessJwt?: string) {
   // Post Cache is shared. Its viewer belongs to whoever populated it, not this reader.
   const publicPosts = posts.map(({ viewer: _viewer, ...post }) => post)
   if (!did || !accessJwt || posts.length === 0) return publicPosts
@@ -171,14 +146,8 @@ async function hydrateViewerRecords(
     const found = new Map<string, string>()
     let cursor: string | undefined
     do {
-      const params = new URLSearchParams({ repo: did, collection, limit: '100' })
-      if (cursor) params.set('cursor', cursor)
-      const body = await requestJson<{
-        records?: Array<{ uri: string; value?: { subject?: { uri?: string } } }>
-        cursor?: string
-      }>(
-        `${BACKEND_BASE}/pds/xrpc/com.atproto.repo.listRecords?${params}`,
-        { headers: { Authorization: `Bearer ${accessJwt}` } },
+      const body = await pdsGet<{ records?: Array<{ uri: string; value?: { subject?: { uri?: string } } }>; cursor?: string }>(
+        'com.atproto.repo.listRecords', searchParams({ repo: did, collection, limit: '100', cursor }), accessJwt,
       )
       for (const record of body.records ?? []) {
         const subject = record.value?.subject?.uri
@@ -192,10 +161,7 @@ async function hydrateViewerRecords(
   }
 
   try {
-    const [likes, reposts] = await Promise.all([
-      list('app.bsky.feed.like'),
-      list('app.bsky.feed.repost'),
-    ])
+    const [likes, reposts] = await Promise.all([list('app.bsky.feed.like'), list('app.bsky.feed.repost')])
     return publicPosts.map((post) => {
       const like = likes.get(post.uri)
       const repost = reposts.get(post.uri)
@@ -211,7 +177,7 @@ async function hydrateAuthorNames(posts: PostView[]) {
   const authors = posts.flatMap((post) => post.reason ? [post.author, post.reason.by] : [post.author])
   const profiles = new Map<string, RicePublicUser>()
   await Promise.all([...new Set(authors.map((author) => author.did))].map(async (did) => {
-    const profile = await requestJson<{ data: RicePublicUser }>(`${BACKEND_BASE}/api/users/${encodeURIComponent(did)}/profile`).catch(() => null)
+    const profile = await backend<{ data: RicePublicUser }>(`/api/users/${encodeURIComponent(did)}/profile`).catch(() => null)
     if (profile?.data?.did === did) profiles.set(did, profile.data)
   }))
   const authorName = (author: PostView['author']) => {
@@ -242,15 +208,10 @@ export function normalizePostImages(post: PostView): PostView {
   const images = source.slice(0, MAX_POST_IMAGES).flatMap((value, index): PostImage[] => {
     if (!value || typeof value !== 'object') return []
     const item = value as { thumb?: unknown; thumbnail?: unknown; fullsize?: unknown; alt?: unknown; image?: { ref?: { $link?: unknown }; cid?: unknown }; aspectRatio?: { width?: number; height?: number } }
-    const httpUrl = (url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url) ? url : undefined
     const original = originals?.[index] as typeof item | undefined
     const cid = item.image?.ref?.$link ?? item.image?.cid ?? original?.image?.ref?.$link ?? original?.image?.cid
     const blobUrl = typeof cid === 'string' && /^[a-z0-9]+$/i.test(cid) ? pdsBlobUrl(post.author.did, cid) : undefined
-    const viewUrl = (value: unknown) => {
-      const url = httpUrl(value)
-      if (!url) return undefined
-      return appviewImageUrl(url)
-    }
+    const viewUrl = (url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url) ? appviewImageUrl(url) : undefined
     const fullsize = viewUrl(item.fullsize)
     const src = viewUrl(item.thumb) ?? viewUrl(item.thumbnail) ?? fullsize ?? blobUrl
     if (!src) return []
@@ -260,43 +221,23 @@ export function normalizePostImages(post: PostView): PostView {
 }
 
 export function normalizePostFeed(payload: unknown): PostFeed {
-  const body = (payload ?? {}) as {
-    posts?: Array<
-      PostView | {
-        post?: PostView
-        reply?: unknown
-        reason?: PostView['reason']
-      }
-    >
-  }
+  const body = (payload ?? {}) as { posts?: Array<PostView | { post?: PostView; reply?: unknown; reason?: PostView['reason'] }> }
   const posts = (body.posts ?? [])
     .map((item): PostView | undefined => {
       if (!('post' in item)) return item as PostView
       if (!item.post || item.reply) return undefined
       return item.reason ? { ...item.post, reason: item.reason } : item.post
     })
-    .filter((post): post is PostView =>
-      Boolean(
-        post?.uri &&
-        post.record?.text !== undefined &&
-        !post.record.reply,
-      ),
-    )
+    .filter((post): post is PostView => Boolean(post?.uri && post.record?.text !== undefined && !post.record.reply))
     .map(normalizePostImages)
-
   return { posts }
 }
 
 async function loadTimelineReposts(accessJwt?: string) {
   if (!accessJwt) return []
   try {
-    const payload = await requestJson<{ feed?: unknown[] }>(
-      `${BACKEND_BASE}/pds/xrpc/app.bsky.feed.getTimeline?limit=50`,
-      { headers: { Authorization: `Bearer ${accessJwt}` } },
-    )
-    return normalizePostFeed({ posts: payload.feed }).posts.filter(
-      (post) => post.reason?.$type === 'app.bsky.feed.defs#reasonRepost',
-    )
+    const payload = await pdsGet<{ feed?: unknown[] }>('app.bsky.feed.getTimeline', 'limit=50', accessJwt)
+    return normalizePostFeed({ posts: payload.feed }).posts.filter((post) => post.reason?.$type === 'app.bsky.feed.defs#reasonRepost')
   } catch (error) {
     if (isSessionAuthError(error)) throw error
     return []
@@ -306,9 +247,8 @@ async function loadTimelineReposts(accessJwt?: string) {
 async function loadOwnRecentPosts(did: string, accessJwt: string) {
   // Read-your-writes: the PDS has committed before the shared index/AppView catches up.
   const params = new URLSearchParams({ repo: did, collection: 'app.bsky.feed.post', limit: String(FEED_PAGE_SIZE) })
-  const payload = await requestJson<{ records?: Array<{ uri: string; cid: string; value: PostView['record'] }> }>(
-    `${BACKEND_BASE}/pds/xrpc/com.atproto.repo.listRecords?${params}`,
-    { headers: { Authorization: `Bearer ${accessJwt}` } },
+  const payload = await pdsGet<{ records?: Array<{ uri: string; cid: string; value: PostView['record'] }> }>(
+    'com.atproto.repo.listRecords', params, accessJwt,
   ).catch((error) => {
     if (isSessionAuthError(error)) throw error
     return null
@@ -329,20 +269,13 @@ function mergeFeedPosts(posts: PostView[], reposts: PostView[]) {
       seenReposts.add(key)
       return true
     })
-    .sort((a, b) =>
-      (b.reason?.indexedAt ?? b.indexedAt).localeCompare(
-        a.reason?.indexedAt ?? a.indexedAt,
-      ),
-    )
+    .sort((a, b) => (b.reason?.indexedAt ?? b.indexedAt).localeCompare(a.reason?.indexedAt ?? a.indexedAt))
 }
 
 export function normalizePostThread(payload: unknown): PostThread {
   const body = payload as { thread?: { post?: PostView; replies?: unknown[] } }
   const post = body.thread?.post
-  if (!post?.uri || post.record?.text === undefined) {
-    throw new Error('帖子暂时无法显示')
-  }
-
+  if (!post?.uri || post.record?.text === undefined) throw new Error('帖子暂时无法显示')
   const replies = (body.thread?.replies ?? [])
     .flatMap((value) => {
       const node = value as { post?: PostView; replies?: unknown[] }
@@ -358,14 +291,7 @@ export function normalizePostThread(payload: unknown): PostThread {
 }
 
 export type GetPostsInput = {
-  query?: string
-  repo?: string
-  tag?: string
-  category?: PostCategory
-  cursor?: string
-  limit?: number
-  accessJwt?: string
-  did?: string
+  query?: string; repo?: string; tag?: string; category?: PostCategory; cursor?: string; limit?: number; accessJwt?: string; did?: string
 }
 
 export async function loadPostPage(data: GetPostsInput) {
@@ -374,23 +300,9 @@ export async function loadPostPage(data: GetPostsInput) {
   if (!Number.isSafeInteger(page) || page < 1) throw new Error('帖子页码无效')
   const endpoint = query ? '/post/api/posts/search' : '/post/api/posts/list'
   const requestBody = query
-    ? {
-        q: query,
-        limit: data.limit ?? 25,
-        sort: 'latest',
-        ...(data.cursor ? { cursor: data.cursor } : {}),
-      }
-    : {
-        page,
-        per_page: data.limit ?? FEED_PAGE_SIZE,
-        ...(data.repo ? { repo: data.repo } : {}),
-        ...(data.tag ? { tag: data.tag } : {}),
-      }
-  const payload = await requestJson<unknown>(`${BACKEND_BASE}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  })
+    ? { q: query, limit: data.limit ?? 25, sort: 'latest', ...(data.cursor ? { cursor: data.cursor } : {}) }
+    : { page, per_page: data.limit ?? FEED_PAGE_SIZE, ...(data.repo ? { repo: data.repo } : {}), ...(data.tag ? { tag: data.tag } : {}) }
+  const payload = await backend<unknown>(endpoint, { method: 'POST', json: requestBody })
 
   const feed = normalizePostFeed(payload)
   const [timelineReposts, ownPosts] = await Promise.all([
@@ -399,11 +311,8 @@ export async function loadPostPage(data: GetPostsInput) {
       ? loadOwnRecentPosts(data.did, data.accessJwt) : [],
   ])
   const indexedUris = new Set(feed.posts.map(post => post.uri))
-  const posts = mergeFeedPosts([...feed.posts, ...ownPosts.filter(post => !indexedUris.has(post.uri))], timelineReposts).filter(
-    (post) =>
-      (!data.tag || hasPostTag(post.record.text, data.tag)) &&
-      (!data.category || postCategory(post.record) === data.category),
-  )
+  const posts = mergeFeedPosts([...feed.posts, ...ownPosts.filter(post => !indexedUris.has(post.uri))], timelineReposts).filter((post) =>
+    (!data.tag || hasPostTag(post.record.text, data.tag)) && (!data.category || postCategory(post.record) === data.category))
   const body = payload as { cursor?: unknown; page?: number; total?: number }
   const currentPage = body.page ?? page
   return {
@@ -420,23 +329,11 @@ export const getPosts = createServerFn({ method: 'POST' })
 
 type PostThreadInput = { uri: string; accessJwt?: string; did?: string }
 export async function loadPostThread(data: PostThreadInput): Promise<PostThread> {
-    const params = new URLSearchParams({
-      uri: data.uri,
-      depth: '2',
-      parentHeight: '0',
-    })
-    const payload = await requestJson<unknown>(
-      `${BACKEND_BASE}/${data.accessJwt ? 'pds' : 'bsky'}/xrpc/app.bsky.feed.getPostThread?${params}`,
-      data.accessJwt ? { headers: { Authorization: `Bearer ${data.accessJwt}` } } : undefined,
-    )
-    const thread = normalizePostThread(payload)
-    const posts = await hydrateViewerRecords(
-      [thread.post, ...thread.replies.map((reply) => reply.post)],
-      data.did,
-      data.accessJwt,
-    )
-    const [namedPost, ...replies] = await hydrateAuthorNames(posts)
-    return { post: namedPost, replies: replies.map((reply, index) => ({ post: reply, parentUri: thread.replies[index].parentUri })) }
+  const params = new URLSearchParams({ uri: data.uri, depth: '2', parentHeight: '0' })
+  const thread = normalizePostThread(await xrpcGet<unknown>('app.bsky.feed.getPostThread', params, data.accessJwt))
+  const posts = await hydrateViewerRecords([thread.post, ...thread.replies.map((reply) => reply.post)], data.did, data.accessJwt)
+  const [namedPost, ...replies] = await hydrateAuthorNames(posts)
+  return { post: namedPost, replies: replies.map((reply, index) => ({ post: reply, parentUri: thread.replies[index].parentUri })) }
 }
 
 export const getPostThread = createServerFn({ method: 'POST' })
@@ -460,77 +357,55 @@ export function loadCachedThread(data: PostThreadInput): Promise<PostThread> {
   return request
 }
 
-type TextPostInput = {
-    did: string
-    accessJwt: string
-    text: string
-    category: PostCategory
-    rkey: string
-    createdAt: string
-    images?: PdsImage[]
-}
+type PdsAuth = { did: string; accessJwt: string }
+type TextPostInput = PdsAuth & { text: string; category: PostCategory; rkey: string; createdAt: string; images?: PdsImage[] }
+type CreatedPost = Awaited<ReturnType<typeof createTextPostRecord>>
 
 export const uploadPostImage = createServerFn({ method: 'POST' })
   .validator((data: { accessJwt: string; base64: string; contentType: string }) => data)
   .handler(({ data }) => uploadPdsImage(data.accessJwt, data.base64, data.contentType))
 
 export async function createTextPostRecord(data: TextPostInput) {
-    const text = data.text.trim()
-    const images = data.images ?? []
-    if (!Array.isArray(images)) throw new Error('图片信息无效，请重新添加。')
-    if (!text && !images.length) throw new Error('请填写帖子内容或添加图片')
-    if (text.length > MAX_POST_TEXT_LENGTH) throw new Error(`帖子内容最多 ${MAX_POST_TEXT_LENGTH} 个字符`)
-    if (images.length > MAX_POST_IMAGES) throw new Error(`帖子最多添加 ${MAX_POST_IMAGES} 张图片。`)
-    if (images.some((item) => item.image?.$type !== 'blob' || !item.image.ref?.$link || !POST_IMAGE_TYPES.includes(item.image.mimeType) || !Number.isFinite(item.image.size) || item.image.size <= 0 || item.image.size > MAX_POST_IMAGE_BYTES || typeof item.alt !== 'string')) throw new Error('图片信息无效，请重新添加。')
-    if (images.some((item) => !item.aspectRatio || !Number.isInteger(item.aspectRatio.width) || item.aspectRatio.width < 1 || !Number.isInteger(item.aspectRatio.height) || item.aspectRatio.height < 1)) throw new Error('图片尺寸无效，请重新添加。')
-    if (!['post', 'activity', 'product'].includes(data.category)) {
-      throw new Error('内容分类无效')
-    }
+  const text = data.text.trim()
+  const images = data.images ?? []
+  if (!Array.isArray(images)) throw new Error('图片信息无效，请重新添加。')
+  if (!text && !images.length) throw new Error('请填写帖子内容或添加图片')
+  if (text.length > MAX_POST_TEXT_LENGTH) throw new Error(`帖子内容最多 ${MAX_POST_TEXT_LENGTH} 个字符`)
+  if (images.length > MAX_POST_IMAGES) throw new Error(`帖子最多添加 ${MAX_POST_IMAGES} 张图片。`)
+  if (images.some((item) => item.image?.$type !== 'blob' || !item.image.ref?.$link || !POST_IMAGE_TYPES.includes(item.image.mimeType) || !Number.isFinite(item.image.size) || item.image.size <= 0 || item.image.size > MAX_POST_IMAGE_BYTES || typeof item.alt !== 'string')) throw new Error('图片信息无效，请重新添加。')
+  if (images.some((item) => !item.aspectRatio || !Number.isInteger(item.aspectRatio.width) || item.aspectRatio.width < 1 || !Number.isInteger(item.aspectRatio.height) || item.aspectRatio.height < 1)) throw new Error('图片尺寸无效，请重新添加。')
+  if (!['post', 'activity', 'product'].includes(data.category)) throw new Error('内容分类无效')
 
-    const createdAt = data.createdAt
-    const record = {
-      $type: 'app.bsky.feed.post', text, langs: ['zh'], xjdaoCategory: data.category, createdAt,
-      ...(images.length ? { embed: postImageEmbed(images) } : {}),
-    }
-    let body: { uri: string; cid: string }
-    try { body = await createPdsRecord(data.accessJwt, {
-      repo: data.did,
-      collection: 'app.bsky.feed.post',
-      rkey: data.rkey,
-      record,
-    }) } catch (error) {
-      // A create may have succeeded before its response was lost. Read the same key;
-      // never retry by creating another record or overwrite the published one.
-      const query = new URLSearchParams({ repo: data.did, collection: 'app.bsky.feed.post', rkey: data.rkey })
-      const existing = await requestJson<{ uri: string; cid: string; value: typeof record }>(`${BACKEND_BASE}/pds/xrpc/com.atproto.repo.getRecord?${query}`, { headers: { Authorization: `Bearer ${data.accessJwt}` } }).catch(() => { throw error })
-      const imageIdentity = (embed: typeof record.embed) => [embed?.$type, (embed?.items ?? []).map((item) => [item.image.ref.$link, item.alt, item.aspectRatio?.width, item.aspectRatio?.height])]
-      if (existing.value.text !== text || existing.value.createdAt !== createdAt || existing.value.xjdaoCategory !== data.category || JSON.stringify(imageIdentity(existing.value.embed)) !== JSON.stringify(imageIdentity(record.embed))) throw new Error('上次提交的帖子已发布。请离开发布页面后查看，再发布新内容。')
-      body = existing
-    }
-    return { uri: body.uri, cid: body.cid, text, createdAt, category: data.category, ...(images.length ? { images } : {}) }
+  const createdAt = data.createdAt
+  const record = {
+    $type: 'app.bsky.feed.post', text, langs: ['zh'], xjdaoCategory: data.category, createdAt,
+    ...(images.length ? { embed: postImageEmbed(images) } : {}),
+  }
+  let body: { uri: string; cid: string }
+  try {
+    body = await createPdsRecord(data.accessJwt, { repo: data.did, collection: 'app.bsky.feed.post', rkey: data.rkey, record })
+  } catch (error) {
+    // A create may have succeeded before its response was lost. Read the same key;
+    // never retry by creating another record or overwrite the published one.
+    const query = new URLSearchParams({ repo: data.did, collection: 'app.bsky.feed.post', rkey: data.rkey })
+    const existing = await pdsGet<{ uri: string; cid: string; value: typeof record }>('com.atproto.repo.getRecord', query, data.accessJwt).catch(() => { throw error })
+    const imageIdentity = (embed: typeof record.embed) => [embed?.$type, (embed?.items ?? []).map((item) => [item.image.ref.$link, item.alt, item.aspectRatio?.width, item.aspectRatio?.height])]
+    if (existing.value.text !== text || existing.value.createdAt !== createdAt || existing.value.xjdaoCategory !== data.category || JSON.stringify(imageIdentity(existing.value.embed)) !== JSON.stringify(imageIdentity(record.embed))) throw new Error('上次提交的帖子已发布。请离开发布页面后查看，再发布新内容。')
+    body = existing
+  }
+  return { uri: body.uri, cid: body.cid, text, createdAt, category: data.category, ...(images.length ? { images } : {}) }
 }
 
 export const createTextPost = createServerFn({ method: 'POST' })
   .validator((data: TextPostInput) => data)
   .handler(({ data }) => createTextPostRecord(data))
 
-type DeletePostInput = {
-  did: string
-  accessJwt: string
-  uri: string
-}
+type DeletePostInput = PdsAuth & { uri: string }
 
 export async function deleteOwnPostRecord(data: DeletePostInput) {
   const collection = 'app.bsky.feed.post'
-  if (!data.uri.startsWith(`at://${data.did}/${collection}/`)) {
-    throw new Error('只能删除自己的帖子')
-  }
-
-  await deletePdsRecord(data.accessJwt, {
-    repo: data.did,
-    collection,
-    rkey: recordKeyFromUri(data.uri, collection),
-  })
+  if (!data.uri.startsWith(`at://${data.did}/${collection}/`)) throw new Error('只能删除自己的帖子')
+  await deleteOwnRecord(data.accessJwt, data.did, collection, data.uri)
   return { uri: data.uri }
 }
 
@@ -538,37 +413,19 @@ export const deletePost = createServerFn({ method: 'POST' })
   .validator((data: DeletePostInput) => data)
   .handler(({ data }) => deleteOwnPostRecord(data))
 
-type ToggleInteractionInput = {
-  did: string
-  accessJwt: string
-  postUri: string
-  postCid: string
-  recordUri?: string
-}
+type ToggleInteractionInput = PdsAuth & { postUri: string; postCid: string; recordUri?: string }
 
-export async function updateInteractionRecord(
-  data: ToggleInteractionInput,
-  collection: InteractionCollection,
-) {
+export async function updateInteractionRecord(data: ToggleInteractionInput, collection: InteractionCollection) {
   if (data.recordUri) {
     if (!ownedInteractionUri(data.recordUri, data.did, collection)) throw new Error('只能取消当前账号的点赞或转发')
-    await deletePdsRecord(data.accessJwt, {
-      repo: data.did,
-      collection,
-      rkey: recordKeyFromUri(data.recordUri, collection),
-    })
+    await deleteOwnRecord(data.accessJwt, data.did, collection, data.recordUri)
     return { recordUri: null, indexedAt: null }
   }
-
   const indexedAt = new Date().toISOString()
   const record = await createPdsRecord(data.accessJwt, {
     repo: data.did,
     collection,
-    record: {
-      $type: collection,
-      subject: { uri: data.postUri, cid: data.postCid },
-      createdAt: indexedAt,
-    },
+    record: { $type: collection, subject: { uri: data.postUri, cid: data.postCid }, createdAt: indexedAt },
   })
   return { recordUri: record.uri, indexedAt }
 }
@@ -581,16 +438,11 @@ export const toggleRepost = createServerFn({ method: 'POST' })
   .validator((data: ToggleInteractionInput) => data)
   .handler(({ data }) => updateInteractionRecord(data, 'app.bsky.feed.repost'))
 
+type StrongRef = { uri: string; cid: string }
+type ReplyInput = PdsAuth & { text: string; root: StrongRef; parent: StrongRef }
+
 export const createReply = createServerFn({ method: 'POST' })
-  .validator(
-    (data: {
-      did: string
-      accessJwt: string
-      text: string
-      root: { uri: string; cid: string }
-      parent: { uri: string; cid: string }
-    }) => data,
-  )
+  .validator((data: ReplyInput) => data)
   .handler(async ({ data }) => {
     const text = data.text.trim()
     if (!text) throw new Error('评论内容不能为空')
@@ -600,13 +452,7 @@ export const createReply = createServerFn({ method: 'POST' })
     const record = await createPdsRecord(data.accessJwt, {
       repo: data.did,
       collection: 'app.bsky.feed.post',
-      record: {
-        $type: 'app.bsky.feed.post',
-        text,
-        langs: ['zh'],
-        reply: { root: data.root, parent: data.parent },
-        createdAt,
-      },
+      record: { $type: 'app.bsky.feed.post', text, langs: ['zh'], reply: { root: data.root, parent: data.parent }, createdAt },
     })
     return { ...record, text, createdAt }
   })

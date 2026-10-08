@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PostFeed } from '~/lib/models'
 import { useStoredSession } from '../session/session'
 import { getPosts } from './api'
+import { errorMessage, mergeBy } from '~/lib/util'
 
 export function useActorPosts(actor: string | undefined, failureMessage: string) {
   const { session } = useStoredSession()
@@ -20,10 +21,10 @@ export function useActorPosts(actor: string | undefined, failureMessage: string)
       const page = await getPosts({ data: { repo: actor, did, accessJwt, cursor } })
       if (current === request.current) setFeed((previous) => cursor ? {
         ...page,
-        posts: [...new Map([...(previous?.posts ?? []), ...page.posts].map((post) => [post.uri, post])).values()],
+        posts: mergeBy([...(previous?.posts ?? []), ...page.posts], (post) => post.uri),
       } : page)
     } catch (reason) {
-      if (current === request.current) setError(reason instanceof Error ? reason.message : failureMessage)
+      if (current === request.current) setError(errorMessage(reason, failureMessage))
     } finally { if (current === request.current) setLoading(false) }
   }
 
