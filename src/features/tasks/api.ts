@@ -92,7 +92,7 @@ export const taskDraftBody = (data: TaskFields) => ({
   application_deadline: data.applicationDeadline,
   reward_amount: data.rewardAmount,
   capacity: data.capacity,
-  node_id: data.nodeId,
+  node_id: data.nodeId || undefined,
   requirement: data.requirement,
   execution_deadline: data.executionDeadline,
   client_request_id: data.clientRequestId,

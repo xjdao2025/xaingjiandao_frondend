@@ -62,9 +62,13 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
   const amountError = rewardAmount === '' ? null : integerInputError(rewardAmount, rewardLabel)
   const totalRewardAmount = !amountError && rewardAmount !== '' && !capacityError ? Number(rewardAmount) * capacity : null
   const totalRewardCopy = totalRewardAmount === null ? '待填写' : multiple ? `${rewardAmount} × ${capacity} = ${totalRewardAmount} 测试稻米` : `${totalRewardAmount} 测试稻米`
+  // 没有可管的节点却能进到这里,说明是平台授权的个人发布者:奖励从自己的稻米里冻结
+  const personal = nodes.length === 0
+  const nodeMissing = !nodeId && !personal
+  const fundingCopy = personal ? '使用你自己的稻米，发布时冻结。' : '使用节点稻米，不扣个人稻米。'
   function validate(step: number): string | null {
     if (step === 0) {
-      if (!nodeId || !title.trim()) return '请选择所属节点并填写任务标题。'
+      if (nodeMissing || !title.trim()) return personal ? '请填写任务标题。' : '请选择所属节点并填写任务标题。'
       if (!organizerContact.trim() || organizerContact.trim().length > 256) return '请填写组织方联系方式，最多 256 字。'
     }
     if (step === 1) {
@@ -89,7 +93,7 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
   }
   async function submit(status: 'draft' | 'open'): Promise<boolean> {
     if (submitting) return false
-    if (!nodeId || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '') { setError('请补齐标题、说明、交付要求和稻米数量。'); return false }
+    if (nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '') { setError('请补齐标题、说明、交付要求和稻米数量。'); return false }
     if ((status === 'open' && !organizerContact.trim()) || organizerContact.trim().length > 256) { setError('请填写组织方联系方式，最多 256 字。'); return false }
     const inputError = capacityError ?? integerInputError(rewardAmount, rewardLabel)
     if (inputError) { setError(inputError); return false }
@@ -105,7 +109,7 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
       if (editing && !draftId) throw new Error('未找到要编辑的任务，请重新打开详情页。')
       if (!draftId) {
         const [saved] = await getTasks({ data: { token: session.token, mine: 'created', status: 'draft', limit: 1 } })
-        if (saved && saved.node?.id !== nodeId) throw new Error('已有另一节点的任务草稿。请重新打开发布页面后继续编辑。')
+        if (saved && (saved.node?.id ?? '') !== nodeId) throw new Error('已有另一节点的任务草稿。请重新打开发布页面后继续编辑。')
         draftId = saved?.id ?? null
       }
       let task = draftId ? await getTask({ data: { token: session.token, id: draftId } }) : null
@@ -134,14 +138,14 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
       return true
     } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : '任务保存失败'); return false } finally { if (mounted.current) setSubmitting(null) }
   }
-  const disabled = !nodeId || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '' || !!amountError || !!capacityError || !!submitting
-  const nodeName = nodes.find(node => node.id === nodeId)?.name ?? '未选择'
+  const disabled = nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '' || !!amountError || !!capacityError || !!submitting
+  const nodeName = personal ? '个人发起' : nodes.find(node => node.id === nodeId)?.name ?? '未选择'
   return <section className="form-card task-compose-form">
     <PublishSteps busy={!!submitting} error={error} notice={notice} onError={setError} validate={validate} canSaveDraft={!disabled && !editing} onSaveDraft={() => submit('draft')} onPublish={() => submit('open')} publishLabel={editing ? '保存修改' : '发布任务'} editing={editing} steps={[
       {
         label: '基本信息', title: '你想一起做什么？',
         content: <>
-          <label className="native-field">所属节点<select required value={nodeId} disabled={(!editing && !!taskId) || rewardReadOnly || !!submitting} onChange={(e) => setNodeId(e.target.value)}>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select></label>
+          {!personal && <label className="native-field">所属节点<select required value={nodeId} disabled={(!editing && !!taskId) || rewardReadOnly || !!submitting} onChange={(e) => setNodeId(e.target.value)}>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select></label>}
           <PublishTextInput isDisabled={!!submitting} label="任务标题" value={title} onChange={(v) => setTitle(v.slice(0, 128))} width="100%" isRequired />
           <ContactField organizer value={organizerContact} onChange={setOrganizerContact} disabled={!!submitting} />
         </>,
@@ -179,8 +183,8 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
       },
       {
         label: '参与与稻米', title: multiple ? '给每位承接者多少稻米？' : '给多少稻米？',
-        content: <><PublishTextInput isDisabled={!!submitting} isReadOnly={rewardReadOnly} label={`${rewardLabel}（测试稻米）`} value={rewardAmount} onChange={v => { setRewardAmount(v); setError(''); setNotice('') }} status={amountError ? { type: 'error', message: amountError } : undefined} width="100%" isRequired />{totalRewardAmount !== null && <p className={multiple ? 'publish-total' : 'muted'}>总冻结：{totalRewardCopy}</p>}<p className="muted">使用节点稻米，不扣个人稻米。</p></>,
-        review: <dl className="publish-review-fields">{multiple && <div><dt>承接人数上限</dt><dd>{capacity} 人</dd></div>}<div><dt>{rewardLabel}</dt><dd>{rewardAmount} 测试稻米</dd></div><div><dt>总冻结</dt><dd>{totalRewardCopy}</dd></div><div><dt>稻米从哪出</dt><dd>{nodeName}：使用节点稻米，不扣个人稻米。</dd></div></dl>,
+        content: <><PublishTextInput isDisabled={!!submitting} isReadOnly={rewardReadOnly} label={`${rewardLabel}（测试稻米）`} value={rewardAmount} onChange={v => { setRewardAmount(v); setError(''); setNotice('') }} status={amountError ? { type: 'error', message: amountError } : undefined} width="100%" isRequired />{totalRewardAmount !== null && <p className={multiple ? 'publish-total' : 'muted'}>总冻结：{totalRewardCopy}</p>}<p className="muted">{fundingCopy}</p></>,
+        review: <dl className="publish-review-fields">{multiple && <div><dt>承接人数上限</dt><dd>{capacity} 人</dd></div>}<div><dt>{rewardLabel}</dt><dd>{rewardAmount} 测试稻米</dd></div><div><dt>总冻结</dt><dd>{totalRewardCopy}</dd></div><div><dt>稻米从哪出</dt><dd>{personal ? fundingCopy : `${nodeName}：${fundingCopy}`}</dd></div></dl>,
       },
     ]} />
   </section>

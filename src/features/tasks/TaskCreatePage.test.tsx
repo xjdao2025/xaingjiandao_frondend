@@ -96,3 +96,13 @@ it('locks the community selector only while editing an active task', () => {
   expect(select('open')).toContain('disabled')
   expect(select('cancelled')).not.toContain('disabled')
 })
+
+it('lets an authorised person without a community publish with their own grain', () => {
+  renderToStaticMarkup(<TaskCreatePage session={{ token: 'token' } as RiceSession} nodes={[]} initialDraft={null} onPublished={() => undefined} onCloseStateChange={() => undefined} />)
+  const props = captured.props!
+  const basics = renderToStaticMarkup(props.steps[0].content)
+  expect(basics).not.toContain('所属节点')
+  expect(props.validate(0)).not.toContain('所属节点')
+  expect(renderToStaticMarkup(props.steps[4].content)).toContain('使用你自己的稻米')
+  expect(renderToStaticMarkup(props.steps[0].review)).toContain('个人发起')
+})
