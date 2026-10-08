@@ -107,7 +107,7 @@ it.each(['@bob.example', '13800138000'])('checks %s after input and writes the r
   const pending = confirm()
   await confirm()
   expect(mock.send).toHaveBeenCalledTimes(1)
-  expect(mock.send).toHaveBeenCalledWith({ data: { token: 'rice-alice', to: 'bob-id', amount: 12, memo: '谢谢' } })
+  expect(mock.send).toHaveBeenCalledWith({ data: { token: 'rice-alice', to: 'bob-id', amount: 12, memo: '谢谢', clientRequestId: expect.any(String) } })
   expect(field('确认送出')?.isDisabled).toBe(true)
   const closeConfirmation = confirmation()!.props.onClose as () => void
   closeConfirmation()
@@ -200,22 +200,16 @@ it('ignores a recipient lookup after switching accounts', async () => {
   expect(render().find((node) => node.props.role === 'status')).toBeUndefined()
 })
 
-it('removes sending and retry controls after an uncertain network failure', async () => {
+it('retries a failed send with the same request id, so it can only be debited once', async () => {
   await confirmRecipient()
-  const confirm = action('确认送出')
   mock.send.mockRejectedValueOnce(new Error('Failed to fetch'))
-  await confirm()
-  const alerts = render().filter((node) => node.props.role === 'alert')
-  const confirmationAlerts = elements(confirmation()!.props.children as ReactNode).filter((node) => node.props.role === 'alert')
-  expect(confirmationAlerts).toHaveLength(alerts.length)
-  expect(confirmationAlerts[0].props.children).toBe('Failed to fetch')
-  expect(alerts[0].props.children).toBe('Failed to fetch')
-  expect(alerts[1].props.children).toEqual(expect.arrayContaining(['送出的结果尚未确认，请先']))
-  expect(field('确认送出')).toBeUndefined()
-  expect(field('返回修改')).toBeUndefined()
-  expect(render().some((node) => String(node.props.label).includes('重试'))).toBe(false)
-  expect(field('送给谁')?.isDisabled).toBe(true)
-  expect(mock.send).toHaveBeenCalledTimes(1)
+  await action('确认送出')()
+  expect(render().find((node) => node.props.role === 'alert')?.props.children).toBe('Failed to fetch')
+  await action('确认送出')()
+  const ids = mock.send.mock.calls.map(([arg]) => arg.data.clientRequestId)
+  expect(ids).toHaveLength(2)
+  expect(ids[0]).toEqual(expect.any(String))
+  expect(ids[1]).toBe(ids[0])
 })
 
 it('rejects transfers to self before any write', async () => {

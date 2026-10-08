@@ -18,18 +18,18 @@ it('sends personal gifts with Rice auth, rejects invalid amounts before transpor
   const fetch = vi.fn().mockResolvedValue(Response.json({ data: receipt }))
   vi.stubGlobal('fetch', fetch)
   for (const amount of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-    await expect(requestPersonalTransfer({ token: 'rice-token', to: 'receiver', amount })).rejects.toThrow('正整数')
+    await expect(requestPersonalTransfer({ token: 'rice-token', to: 'receiver', amount, clientRequestId: 'gift-key' })).rejects.toThrow('正整数')
   }
-  await expect(requestPersonalTransfer({ token: 'rice-token', to: ' ', amount: 1 })).rejects.toThrow('送给谁')
+  await expect(requestPersonalTransfer({ token: 'rice-token', to: ' ', amount: 1, clientRequestId: 'gift-key' })).rejects.toThrow('送给谁')
   expect(fetch).not.toHaveBeenCalled()
-  await expect(requestPersonalTransfer({ token: 'rice-token', to: ' receiver ', amount: 12, memo: '  谢谢  ' })).resolves.toEqual(receipt)
+  await expect(requestPersonalTransfer({ token: 'rice-token', to: ' receiver ', amount: 12, memo: '  谢谢  ', clientRequestId: 'gift-key' })).resolves.toEqual(receipt)
   const [url, init] = fetch.mock.calls[0]
   expect(url).toMatch(/\/api\/grain_transfers$/)
   expect(init.headers.Authorization).toBe('Bearer rice-token')
-  expect(JSON.parse(init.body)).toEqual({ to: 'receiver', amount: 12, kind: 'gift', memo: '谢谢' })
+  expect(JSON.parse(init.body)).toEqual({ to: 'receiver', amount: 12, kind: 'gift', memo: '谢谢', client_request_id: 'gift-key' })
   for (const data of [{}, { ...receipt, amount: 1 }, { ...receipt, to: null }]) {
     fetch.mockResolvedValueOnce(Response.json({ data }))
-    await expect(requestPersonalTransfer({ token: 'rice-token', to: 'receiver', amount: 12 })).rejects.toThrow('查看稻米记录')
+    await expect(requestPersonalTransfer({ token: 'rice-token', to: 'receiver', amount: 12, clientRequestId: 'gift-key' })).rejects.toThrow('查看稻米记录')
   }
 })
 it('distinguishes returned frozen funds from settlement direction for both parties', () => {

@@ -68,8 +68,9 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
   const [receipt, setReceipt] = useState<PersonalTransfer | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [uncertain, setUncertain] = useState(false)
   const pending = useRef(false)
+  // 重试标识跟着送出的内容走:内容不变就复用,超时后再点确认也只会扣一次
+  const request = useRef<{ key: string; id: string } | null>(null)
   const lookupVersion = useRef(0)
   const autoChecked = useRef('')
   const pendingLookup = useRef<{ identifier: string; request: Promise<RicePublicUser> } | null>(null)
@@ -121,26 +122,23 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
   }
   const cancelConfirmation = () => {
     if (pending.current) return
-    if (uncertain) { void navigate({ to: '/me/grains' }); return }
     setConfirming(false); setError('')
   }
   const run = async () => {
-    if (!current() || pending.current || !identifier.trim() || !amount || amountError || uncertain) return
+    if (!current() || pending.current || !identifier.trim() || !amount || amountError) return
     pending.current = true; setBusy(true); setError('')
     try {
       if (!confirming) {
         const user = recipient ?? await lookup(identifier)
         if (user && current()) setConfirming(true)
       } else {
-        const result = await sendPersonalGrains({ data: { token: session.token, to: recipient!.id, amount: Number(amount), memo } })
+        const key = `${recipient!.id}:${amount}:${memo}`
+        if (request.current?.key !== key) request.current = { key, id: crypto.randomUUID() }
+        const result = await sendPersonalGrains({ data: { token: session.token, to: recipient!.id, amount: Number(amount), memo, clientRequestId: request.current.id } })
         if (current()) { window.dispatchEvent(new Event('rice-changed')); setReceipt(result) }
       }
     } catch (reason) {
-      if (current()) {
-        setError(reason instanceof Error ? reason.message : '送稻米失败。')
-        // No automatic retry: this existing transfer API has no idempotency key.
-        if (confirming) setUncertain(true)
-      }
+      if (current()) setError(reason instanceof Error ? reason.message : '送稻米失败。')
     } finally { pending.current = false; if (current()) setBusy(false) }
   }
   if (scanning) return <GrainScannerPage onRead={receiveCode} />
@@ -148,23 +146,23 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
       {receipt ? <><strong role="status">已送给 @{receipt.to.handle} {receipt.amount} 稻米</strong><Link to="/me/grains">查看稻米记录</Link><div className="form-actions"><Button label="完成" variant="primary" onClick={() => void navigate({ to: '/me/grains' })} /></div></> : <>
         <p className="muted">个人测试稻米</p>
         <div className="grain-recipient-field">
-          <TextInput label="送给谁" value={identifier} onChange={changeIdentifier} onBlur={() => autoCheck(identifier)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) autoCheck(identifier) }} description="填写手机号、完整用户名或 DID。" isDisabled={busy || confirming || uncertain} width="100%" />
-          <IconButton label="扫一扫" icon={<ScanLine size={22} />} variant="ghost" isDisabled={busy || confirming || uncertain} onClick={() => void navigate({ to: '/me/grains/send/scan', search: {} })} />
+          <TextInput label="送给谁" value={identifier} onChange={changeIdentifier} onBlur={() => autoCheck(identifier)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) autoCheck(identifier) }} description="填写手机号、完整用户名或 DID。" isDisabled={busy || confirming } width="100%" />
+          <IconButton label="扫一扫" icon={<ScanLine size={22} />} variant="ghost" isDisabled={busy || confirming } onClick={() => void navigate({ to: '/me/grains/send/scan', search: {} })} />
         </div>
         {recipient && !confirming && <div role="status">送给：<strong>{recipient.nickname || recipient.handle}</strong>（@{recipient.handle}）</div>}
         {!confirming && error && <p className="inline-error" role="alert">{error}</p>}
-        <TextInput label="送多少稻米" value={amount} onChange={setAmount} status={amountError ? { type: 'error', message: amountError } : undefined} isDisabled={busy || confirming || uncertain} width="100%" />
-        <TextInput label="留言" value={memo} onChange={setMemo} isDisabled={busy || confirming || uncertain} width="100%" isOptional />
+        <TextInput label="送多少稻米" value={amount} onChange={setAmount} status={amountError ? { type: 'error', message: amountError } : undefined} isDisabled={busy || confirming } width="100%" />
+        <TextInput label="留言" value={memo} onChange={setMemo} isDisabled={busy || confirming } width="100%" isOptional />
         {!confirming && <div className="form-actions"><Button label="下一步" variant="primary" isLoading={busy} isDisabled={busy || !identifier.trim() || !amount || !!amountError} clickAction={run} /></div>}
       </>}
     {confirming && recipient && !receipt && <DetailDialog title="确认送稻米" className="post-dialog business-dialog compose-close-dialog" onClose={cancelConfirmation}>
       <div className="business-panel form-stack">
         <section><Avatar name={recipient.nickname || recipient.handle} src={recipient.avatar?.url} /><strong>{recipient.nickname || recipient.handle}</strong><p>@{recipient.handle}</p><p>确认送出 {amount} 稻米？</p></section>
         {error && <p className="inline-error" role="alert">{error}</p>}
-        {uncertain ? <p role="alert">送出的结果尚未确认，请先<Link to="/me/grains">查看稻米记录</Link>，确认未扣除稻米后再重新送出。</p> : <div className="form-actions">
+        <div className="form-actions">
           <Button label="返回修改" variant="secondary" isDisabled={busy} onClick={cancelConfirmation} />
           <Button label="确认送出" variant="primary" isLoading={busy} isDisabled={busy} clickAction={run} />
-        </div>}
+        </div>
       </div>
     </DetailDialog>}
   </div>
