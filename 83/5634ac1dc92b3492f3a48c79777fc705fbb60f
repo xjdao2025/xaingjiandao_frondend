@@ -1,0 +1,40 @@
+src/features/tasks/TaskDetailPage.test.tsx
+  s_8c80ad8d2af680::t_94df619c1706d2 172-219
+src/features/tasks/api.ts
+  s_8c80ad8d2af680::t_7dd24d24e48856 121
+  s_8c80ad8d2af680::t_3f4fdacaba0144 137-156
+src/features/tasks/TaskDetailPage.tsx
+  s_8c80ad8d2af680::t_a10029395b810d 178-179
+  s_8c80ad8d2af680::t_7c669d6ce498f2 300-351
+  s_8c80ad8d2af680::t_01bb0ccfba0adf 148-152
+  s_8c80ad8d2af680::t_da9cae4fd79746 61-63
+  s_8c80ad8d2af680::t_a9e94c801c49ee 189
+  s_8c80ad8d2af680::t_fafa3de9c990e9 105-107
+  s_8c80ad8d2af680::t_c81a1b6e3a8d7f 133-136
+  s_8c80ad8d2af680::t_34217a7aa1f6ec 24,27,37
+  s_8c80ad8d2af680::t_bdc9618845ff84 191,194
+  s_8c80ad8d2af680::t_a92ecb40aeda4f 244-246
+src/features/notifications/NotificationsPage.tsx
+  s_8c80ad8d2af680::t_23b697ca3fd638 35
+src/features/tasks/types.ts
+  s_8c80ad8d2af680::t_6fcffb75ac117c 134
+  s_8c80ad8d2af680::t_082a3d15149020 20-22
+  s_8c80ad8d2af680::t_58e07087b052ff 157
+  s_8c80ad8d2af680::t_54215f4d317959 88-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "835634ac1dc92b3492f3a48c79777fc705fbb60f",
+  "prompts": {},
+  "sessions": {
+    "s_8c80ad8d2af680": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e1cacbb5-9264-4c9e-8d1e-0245a530ded4",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
