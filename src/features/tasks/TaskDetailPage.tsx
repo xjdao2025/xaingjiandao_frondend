@@ -108,6 +108,7 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
   const token = session?.token
   const capacity = task.capacity ?? 1
   const multiple = capacity > 1
+  const refundTo = task.funding_node_id ? '节点账户' : '发布者'
   const assignees = task.assignees ?? (task.assignee ? [task.assignee] : [])
   const totalReward = task.total_reward_amount ?? task.reward_amount * capacity
   const recruiting = !task.application_closed && (!task.application_deadline || Date.parse(task.application_deadline) > now) && (task.appointed_count ?? assignees.length) < capacity
@@ -254,7 +255,7 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
             <Button label="提前结束任务" variant="destructive" onClick={() => setCloseOpen(true)} />
             {closeOpen && <ConfirmDialog title="确认提前结束" busy={busy} error={error} onClose={() => setCloseOpen(false)} back="继续任务" confirm="确认结束" variant="destructive"
               onConfirm={act(() => closeTask({ data: { token, taskId } }))}>
-              {multiple ? '已验收通过的交付保留；还在承接的伙伴会被撤销指派，等待中的申请落选，没发出去的稻米退回节点账户。' : '承接的伙伴会被撤销指派，冻结的稻米退回节点账户。'}结束后不能再申请或指派。
+              {multiple ? `已验收通过的交付保留；还在承接的伙伴会被撤销指派，等待中的申请落选，没发出去的稻米退回${refundTo}。` : `承接的伙伴会被撤销指派，冻结的稻米退回${refundTo}。`}结束后不能再申请或指派。
             </ConfirmDialog>}
           </section>
         ) : null}

@@ -204,7 +204,8 @@ it('retries a failed send with the same request id, so it can only be debited on
   await confirmRecipient()
   mock.send.mockRejectedValueOnce(new Error('Failed to fetch'))
   await action('确认送出')()
-  expect(render().find((node) => node.props.role === 'alert')?.props.children).toBe('Failed to fetch')
+  // 网络失败不等于没送出:提示先查记录,再点确认仍用同一个标识
+  expect(render().find((node) => node.props.role === 'alert')?.props.children).toBe('Failed to fetch 可能已经送出，改动前请先查看稻米记录。')
   await action('确认送出')()
   const ids = mock.send.mock.calls.map(([arg]) => arg.data.clientRequestId)
   expect(ids).toHaveLength(2)

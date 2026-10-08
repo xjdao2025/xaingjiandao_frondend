@@ -13,7 +13,7 @@ import { readStoredSession, useStoredSession } from '../session/session'
 import { LoginLink } from '../session/LoginLink'
 import { getTransferRecipient, sendPersonalGrains, type PersonalTransfer } from './api'
 import { GrainScannerPage } from './GrainScannerPage'
-import { errorMessage } from '~/lib/util'
+import { errorMessage, requestIdFor, sendErrorMessage } from '~/lib/util'
 
 export function grainReceiveLink(origin: string, did: string) {
   return `${origin}/profile/${encodeURIComponent(did)}?send=1`
@@ -71,7 +71,7 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
   const [error, setError] = useState('')
   const pending = useRef(false)
   // 重试标识跟着送出的内容走:内容不变就复用,超时后再点确认也只会扣一次
-  const request = useRef<{ key: string; id: string } | null>(null)
+  const requestIds = useRef(new Map<string, string>())
   const lookupVersion = useRef(0)
   const autoChecked = useRef('')
   const pendingLookup = useRef<{ identifier: string; request: Promise<RicePublicUser> } | null>(null)
@@ -133,13 +133,12 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
         const user = recipient ?? await lookup(identifier)
         if (user && current()) setConfirming(true)
       } else {
-        const key = `${recipient!.id}:${amount}:${memo}`
-        if (request.current?.key !== key) request.current = { key, id: crypto.randomUUID() }
-        const result = await sendPersonalGrains({ data: { token: session.token, to: recipient!.id, amount: Number(amount), memo, clientRequestId: request.current.id } })
+        const clientRequestId = requestIdFor(requestIds.current, `${recipient!.id}:${amount}:${memo.trim()}`)
+        const result = await sendPersonalGrains({ data: { token: session.token, to: recipient!.id, amount: Number(amount), memo, clientRequestId } })
         if (current()) { window.dispatchEvent(new Event('rice-changed')); setReceipt(result) }
       }
     } catch (reason) {
-      if (current()) setError(errorMessage(reason, '送稻米失败。'))
+      if (current()) setError(confirming ? sendErrorMessage(reason, '送稻米失败。') : errorMessage(reason, '送稻米失败。'))
     } finally { pending.current = false; if (current()) setBusy(false) }
   }
   if (scanning) return <GrainScannerPage onRead={receiveCode} />

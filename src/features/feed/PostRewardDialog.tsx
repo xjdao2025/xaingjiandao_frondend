@@ -9,7 +9,7 @@ import type { PostView, RiceSession } from '~/lib/models'
 
 import { readStoredSession } from '../session/session'
 import { sendPostReward, type PostReward } from './reward'
-import { errorMessage } from '~/lib/util'
+import { requestIdFor, sendErrorMessage } from '~/lib/util'
 
 export function PostRewardDialog({ post, session, onClose }: { post: PostView; session: RiceSession; onClose: () => void }) {
   const [amount, setAmount] = useState('')
@@ -19,7 +19,7 @@ export function PostRewardDialog({ post, session, onClose }: { post: PostView; s
   const [receipt, setReceipt] = useState<PostReward | null>(null)
   const pending = useRef(false)
   // 同一金额的重试复用同一个标识,超时后再点确认也只会扣一次
-  const request = useRef<{ amount: string; id: string } | null>(null)
+  const requestIds = useRef(new Map<string, string>())
   const recipient = post.author.displayName && post.author.displayName !== post.author.handle
     ? post.author.displayName : `@${post.author.handle}`
   const amountError = amount ? integerInputError(amount, '赞赏稻米数量', 1) : null
@@ -32,12 +32,11 @@ export function PostRewardDialog({ post, session, onClose }: { post: PostView; s
     setBusy(true)
     setError('')
     try {
-      if (request.current?.amount !== amount) request.current = { amount, id: crypto.randomUUID() }
-      const result = await sendPostReward({ data: { token: session.token, to: post.author.did, amount: Number(amount), subjectUri: post.uri, clientRequestId: request.current.id } })
+      const result = await sendPostReward({ data: { token: session.token, to: post.author.did, amount: Number(amount), subjectUri: post.uri, clientRequestId: requestIdFor(requestIds.current, amount) } })
       window.dispatchEvent(new Event('rice-changed'))
       setReceipt(result)
     } catch (reason) {
-      setError(errorMessage(reason, '赞赏失败。'))
+      setError(sendErrorMessage(reason, '赞赏失败。'))
     } finally {
       pending.current = false
       setBusy(false)

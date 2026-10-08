@@ -77,9 +77,12 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
   // 没有可管的节点却能进到这里,说明是平台授权的个人发布者:奖励从自己的稻米里冻结
   const personal = nodes.length === 0
   const nodeMissing = !nodeId && !personal
+  // 草稿是在还管着某个节点时存的,现在已不再管理:它仍属于那个节点,不能悄悄改成个人发起
+  const lostNode = personal && !!nodeId ? '这份草稿属于你已不再管理的节点，不能改为个人发起。' : ''
   const fundingCopy = personal ? '使用你自己的稻米，发布时冻结。' : '使用节点稻米，不扣个人稻米。'
   function validate(step: number): string | null {
     if (step === 0) {
+      if (lostNode) return lostNode
       if (nodeMissing || !title.trim()) return personal ? '请填写任务标题。' : '请选择所属节点并填写任务标题。'
       if (!organizerContact.trim() || organizerContact.trim().length > 256) return '请填写组织方联系方式，最多 256 字。'
     }
@@ -105,6 +108,7 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
   }
   async function submit(status: 'draft' | 'open'): Promise<boolean> {
     if (busy) return false
+    if (lostNode) { setError(lostNode); return false }
     if (nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '') { setError('请补齐标题、说明、交付要求和稻米数量。'); return false }
     if ((status === 'open' && !organizerContact.trim()) || organizerContact.trim().length > 256) { setError('请填写组织方联系方式，最多 256 字。'); return false }
     const inputError = capacityError ?? integerInputError(rewardAmount, rewardLabel)
@@ -150,7 +154,7 @@ export function TaskCreatePage({ session, nodes, initialDraft, initialError = ''
       return true
     } catch (e) { if (mounted.current) setError(errorMessage(e, '任务保存失败')); return false } finally { if (mounted.current) setBusy(false) }
   }
-  const disabled = nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '' || !!amountError || !!capacityError || busy
+  const disabled = !!lostNode || nodeMissing || !title.trim() || !description.trim() || !requirement.trim() || rewardAmount === '' || !!amountError || !!capacityError || busy
   const nodeName = personal ? '个人发起' : nodes.find(node => node.id === nodeId)?.name ?? '未选择'
   return <section className="form-card task-compose-form">
     <PublishSteps busy={busy} error={error} notice={notice} onError={setError} validate={validate} canSaveDraft={!disabled && !editing} onSaveDraft={() => submit('draft')} onPublish={() => submit('open')} publishLabel={editing ? '保存修改' : '发布任务'} editing={editing} steps={[

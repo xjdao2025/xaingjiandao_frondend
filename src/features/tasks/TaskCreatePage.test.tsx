@@ -106,3 +106,9 @@ it('lets an authorised person without a community publish with their own grain',
   expect(renderToStaticMarkup(props.steps[4].content)).toContain('使用你自己的稻米')
   expect(renderToStaticMarkup(props.steps[0].review)).toContain('个人发起')
 })
+
+it('refuses to turn a draft of a community the person no longer manages into a personal task', () => {
+  const draft = { id: 'task-1', node: { id: 'node-1', name: '社区', logo: null }, title: '任务', description: '说明', requirement: '要求', organizer_contact: 'c', reward_amount: 1, capacity: 1, attachments: [], status: 'draft', application_deadline: null, execution_deadline: null } as unknown as RiceTask
+  renderToStaticMarkup(<TaskCreatePage session={{ token: 'token' } as RiceSession} nodes={[]} initialDraft={draft} onPublished={() => undefined} onCloseStateChange={() => undefined} />)
+  expect(captured.props!.validate(0)).toContain('不再管理的节点')
+})
