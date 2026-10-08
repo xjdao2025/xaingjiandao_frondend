@@ -342,7 +342,7 @@ function TaskDetails({ taskId, initial }: { taskId: string; initial?: TaskDetail
           <section className="task-action-section">
             <Button label="提前结束任务" variant="destructive" onClick={() => setCloseOpen(true)} />
             {closeOpen && <DetailDialog title="确认提前结束" className="post-dialog business-dialog compose-close-dialog" onClose={() => { if (!busy) setCloseOpen(false) }}><div className="business-panel form-stack">
-              <p>已验收通过的交付保留；还在承接的伙伴会被撤销指派，等待中的申请落选，没发出去的稻米退回节点账户。结束后不能再申请或指派。</p>
+              <p>{multiple ? '已验收通过的交付保留；还在承接的伙伴会被撤销指派，等待中的申请落选，没发出去的稻米退回节点账户。' : '承接的伙伴会被撤销指派，冻结的稻米退回节点账户。'}结束后不能再申请或指派。</p>
               {error && <p className="inline-error" role="alert">{error}</p>}
               <div className="form-actions"><Button label="继续任务" variant="secondary" isDisabled={busy} onClick={() => setCloseOpen(false)} /><Button label="确认结束" variant="destructive" isDisabled={busy} clickAction={() => run(() => closeTask({ data: { token, taskId } }))} /></div>
             </div></DetailDialog>}
