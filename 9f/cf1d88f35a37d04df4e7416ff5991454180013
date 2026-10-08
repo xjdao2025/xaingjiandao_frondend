@@ -1,0 +1,19 @@
+Dockerfile
+  s_8c80ad8d2af680::t_a0e1cd529a8d41 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9fcf1d88f35a37d04df4e7416ff5991454180013",
+  "prompts": {},
+  "sessions": {
+    "s_8c80ad8d2af680": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e1cacbb5-9264-4c9e-8d1e-0245a530ded4",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
