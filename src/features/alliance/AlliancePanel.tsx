@@ -178,7 +178,7 @@ export function GovernanceDetail({ kind, id }: { kind: 'announcement' | 'proposa
     {document && <>{proposal && <ProposalHeader proposal={proposal} />}<h1>{document.title}</h1>{!proposal && <time className="muted">{formatTimestamp(document.inserted_at)}</time>}
       {document.attachment ? <GovernanceBody key={document.attachment.id} attachment={document.attachment} /> : <p className="muted">暂无正文。</p>}
       {proposal && <section className="business-section"><p>总投票数：{proposal.total_votes} · {open ? `截止时间：${formatTimestamp(proposal.closes_at)}` : '已结束'}</p><VoteResults proposal={proposal} />
-        {proposal.my_vote ? <p role="status">已投票：{proposal.my_vote === 'agree' ? '同意' : '反对'}</p> : open && (session ? <div className="form-actions"><Button label="同意" variant="primary" isDisabled={busy} onClick={() => { setError(''); setVoteChoice('agree') }} /><Button label="反对" variant="secondary" isDisabled={busy} onClick={() => { setError(''); setVoteChoice('oppose') }} /></div> : <LoginLink>登录后投票</LoginLink>)}
+        {proposal.my_vote ? <p role="status">已投票：{proposal.my_vote === 'agree' ? '同意' : '反对'}</p> : open && (!session ? <LoginLink>登录后投票</LoginLink> : session.user.node_member ? <div className="form-actions"><Button label="同意" variant="primary" isDisabled={busy} onClick={() => { setError(''); setVoteChoice('agree') }} /><Button label="反对" variant="secondary" isDisabled={busy} onClick={() => { setError(''); setVoteChoice('oppose') }} /></div> : <p className="muted">只有节点用户可以投票。</p>)}
       </section>}
       {proposal && <ProposalComments key={proposal.id} proposalId={proposal.id} />}
     </>}
