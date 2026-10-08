@@ -26,6 +26,10 @@ export type TaskPage = {
 const authHeaders = (token?: string) =>
   token ? { Authorization: `Bearer ${token}` } : undefined
 
+/** 任务接口的 URL：每一段都编码，id 里带 `../` 也越不出 /api/tasks。 */
+const taskUrl = (...segments: string[]) =>
+  [`${BACKEND_BASE}/api/tasks`, ...segments.map(encodeURIComponent)].join('/')
+
 export function buildTaskListQuery(data: TaskListInput) {
   const query = new URLSearchParams()
   if (data.nodeId) query.set('node_id', data.nodeId)
@@ -61,7 +65,7 @@ export const getTaskPage = createServerFn({ method: 'POST' })
 export const getTask = createServerFn({ method: 'POST' })
   .validator((data: { id: string; token?: string }) => data)
   .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(`${BACKEND_BASE}/api/tasks/${data.id}`, {
+    const body = await requestJson<{ data: RiceTask }>(taskUrl(data.id), {
       headers: authHeaders(data.token),
     })
     return body.data
@@ -107,138 +111,73 @@ export const createTask = createServerFn({ method: 'POST' })
     return body.data
   })
 
-export const updateTask = createServerFn({ method: 'POST' })
-  .validator((data: TaskFields & { taskId: string; applicationDeadline: string | null }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(`${BACKEND_BASE}/api/tasks/${data.taskId}`, {
-      method: 'PATCH',
-      headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-      body: JSON.stringify(taskDraftBody(data)),
-    })
-    return body.data
+const send = async (token: string, method: 'POST' | 'PATCH', segments: string[], payload?: object) => {
+  const body = await requestJson<{ data: RiceTask }>(taskUrl(...segments), {
+    method,
+    headers: payload ? { ...authHeaders(token), 'Content-Type': 'application/json' } : authHeaders(token),
+    body: payload && JSON.stringify(payload),
   })
-
-const taskAction = async (token: string, taskId: string, action: 'publish' | 'cancel' | 'close') => {
-  const body = await requestJson<{ data: RiceTask }>(
-    `${BACKEND_BASE}/api/tasks/${taskId}/${action}`,
-    { method: 'POST', headers: authHeaders(token) },
-  )
   return body.data
 }
 
+export const updateTask = createServerFn({ method: 'POST' })
+  .validator((data: TaskFields & { taskId: string; applicationDeadline: string | null }) => data)
+  .handler(({ data }) => send(data.token, 'PATCH', [data.taskId], taskDraftBody(data)))
+
+type TaskRef = { token: string; taskId: string }
+type ApplicationRef = TaskRef & { applicationId: string }
+
 export const publishTask = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string }) => data)
-  .handler(({ data }) => taskAction(data.token, data.taskId, 'publish'))
+  .validator((data: TaskRef) => data)
+  .handler(({ data }) => send(data.token, 'POST', [data.taskId, 'publish']))
 
 export const cancelTask = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string }) => data)
-  .handler(({ data }) => taskAction(data.token, data.taskId, 'cancel'))
+  .validator((data: TaskRef) => data)
+  .handler(({ data }) => send(data.token, 'POST', [data.taskId, 'cancel']))
 
 /** 多人任务提前结束：已验收的保留，其余承接者撤销指派，没发出去的稻米退回节点。 */
 export const closeTask = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string }) => data)
-  .handler(({ data }) => taskAction(data.token, data.taskId, 'close'))
+  .validator((data: TaskRef) => data)
+  .handler(({ data }) => send(data.token, 'POST', [data.taskId, 'close']))
 
 /** 多人任务撤销一个人的指派：名额让出来，奖励不发。 */
 export const releaseTaskAssignee = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string; applicationId: string; reason: string }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(
-      `${BACKEND_BASE}/api/tasks/${data.taskId}/applications/${data.applicationId}/release`,
-      {
-        method: 'POST',
-        headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: data.reason }),
-      },
-    )
-    return body.data
-  })
+  .validator((data: ApplicationRef & { reason: string }) => data)
+  .handler(({ data }) =>
+    send(data.token, 'POST', [data.taskId, 'applications', data.applicationId, 'release'], { reason: data.reason }))
 
 export const applyForTask = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string; reason: string; contact: string }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(
-      `${BACKEND_BASE}/api/tasks/${data.taskId}/applications`,
-      {
-        method: 'POST',
-        headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: data.reason, contact: data.contact }),
-      },
-    )
-    return body.data
-  })
+  .validator((data: TaskRef & { reason: string; contact: string }) => data)
+  .handler(({ data }) =>
+    send(data.token, 'POST', [data.taskId, 'applications'], { reason: data.reason, contact: data.contact }))
 
 export const appointTaskApplication = createServerFn({ method: 'POST' })
-  .validator((data: {
-    token: string
-    taskId: string
-    applicationId: string
-    appointmentReason: string
-  }) => data)
-  .handler(async ({ data }) => {
-    const body = await requestJson<{ data: RiceTask }>(
-      `${BACKEND_BASE}/api/tasks/${data.taskId}/applications/${data.applicationId}/appoint`,
-      {
-        method: 'POST',
-        headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appointment_reason: data.appointmentReason }),
-      },
-    )
-    return body.data
-  })
+  .validator((data: ApplicationRef & { appointmentReason: string }) => data)
+  .handler(({ data }) =>
+    send(data.token, 'POST', [data.taskId, 'applications', data.applicationId, 'appoint'], {
+      appointment_reason: data.appointmentReason,
+    }))
 
-type RejectTaskApplicationInput = { token: string; taskId: string; applicationId: string }
-
-export async function rejectTaskApplicationRequest(data: RejectTaskApplicationInput) {
-  const body = await requestJson<{ data: RiceTask }>(
-    `${BACKEND_BASE}/api/tasks/${data.taskId}/applications/${data.applicationId}/reject`,
-    { method: 'POST', headers: authHeaders(data.token) },
-  )
-  return body.data
-}
+export const rejectTaskApplicationRequest = (data: ApplicationRef) =>
+  send(data.token, 'POST', [data.taskId, 'applications', data.applicationId, 'reject'])
 
 export const rejectTaskApplication = createServerFn({ method: 'POST' })
-  .validator((data: RejectTaskApplicationInput) => data)
+  .validator((data: ApplicationRef) => data)
   .handler(({ data }) => rejectTaskApplicationRequest(data))
 
 export const submitTaskResult = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string; body: string }) => data)
-  .handler(async ({ data }) => {
-    const result = await requestJson<{ data: RiceTask }>(
-      `${BACKEND_BASE}/api/tasks/${data.taskId}/submissions`,
-      {
-        method: 'POST',
-        headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: data.body }),
-      },
-    )
-    return result.data
-  })
+  .validator((data: TaskRef & { body: string }) => data)
+  .handler(({ data }) => send(data.token, 'POST', [data.taskId, 'submissions'], { body: data.body }))
 
-const reviewTask = async (
-  data: { token: string; taskId: string; submissionId: string; reason?: string },
-  action: 'approve' | 'request_changes',
-) => {
-  const body = await requestJson<{ data: RiceTask }>(
-    `${BACKEND_BASE}/api/tasks/${data.taskId}/submissions/${data.submissionId}/${action}`,
-    {
-      method: 'POST',
-      headers: { ...authHeaders(data.token), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: data.reason }),
-    },
-  )
-  return body.data
-}
+type SubmissionReview = TaskRef & { submissionId: string; reason?: string }
+
+const reviewTask = (data: SubmissionReview, action: 'approve' | 'request_changes') =>
+  send(data.token, 'POST', [data.taskId, 'submissions', data.submissionId, action], { reason: data.reason })
 
 export const approveTaskResult = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; taskId: string; submissionId: string }) => data)
+  .validator((data: SubmissionReview) => data)
   .handler(({ data }) => reviewTask(data, 'approve'))
 
 export const requestTaskChanges = createServerFn({ method: 'POST' })
-  .validator((data: {
-    token: string
-    taskId: string
-    submissionId: string
-    reason: string
-  }) => data)
+  .validator((data: SubmissionReview & { reason: string }) => data)
   .handler(({ data }) => reviewTask(data, 'request_changes'))

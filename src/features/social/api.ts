@@ -11,7 +11,7 @@ export type UserSearchPage = {
   meta: { next_cursor: string | null }
 }
 
-export async function loadUserSearch(data: { q: string; before?: string }) {
+async function loadUserSearch(data: { q: string; before?: string }) {
   const q = data.q.trim()
   if (!q) return { data: [], meta: { next_cursor: null } } satisfies UserSearchPage
   const params = new URLSearchParams({ q, limit: '10' })

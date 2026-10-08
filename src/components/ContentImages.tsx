@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom'
 import { IMAGE_ACCEPT, MAX_IMAGE_BYTES, MAX_IMAGE_COUNT, imageSizeLabel, validateImageFiles } from '~/lib/images'
 import '~/styles/images.css'
 
-export type PreviewImage = { src: string; alt: string; fullsize?: string }
+type PreviewImage = { src: string; alt: string; fullsize?: string }
 
 function ContentImage({ src, alt, loading, canRetry = false }: PreviewImage & { loading?: 'lazy'; canRetry?: boolean }) {
   const [failed, setFailed] = useState(false)

@@ -5,22 +5,3 @@ dist
 *.log
 .DS_Store
 
-# Local browser/design captures. Keep only the reviewed final comparisons.
-qa/*
-!qa/activity-detail-comparison.png
-!qa/activity-detail-flow-comparison.png
-!qa/account-security-comparison.png
-!qa/activity-tag-comparison.png
-!qa/compose-flow-comparison.png
-!qa/final-notifications-desktop.png
-!qa/final-plaza-desktop.png
-!qa/final-profile-desktop.png
-!qa/final-task-desktop.png
-!qa/my-posts-before-after.png
-!qa/notifications-mobile-comparison.png
-!qa/profile-mobile-comparison.png
-!qa/profile-single-column-before-after.png
-!qa/sync-state-before-after.png
-!qa/task-mobile-comparison.png
-!qa/task-v1-detail-comparison.png
-!qa/task-v1-list-comparison.png

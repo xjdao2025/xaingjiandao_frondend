@@ -20,7 +20,7 @@ import { createTextPost, createdPostView, prependCachedPost, uploadPostImage } f
 import { deletePostDraft, readPostDraft, savePostDraft, type PostDraft } from './post-draft'
 
 export type ComposeKind = 'post' | 'activity' | 'task'
-export const composeKinds: Array<{ value: ComposeKind; label: string }> = [{ value: 'post', label: '发帖' }, { value: 'task', label: '发任务' }, { value: 'activity', label: '发活动' }]
+const composeKinds: Array<{ value: ComposeKind; label: string }> = [{ value: 'post', label: '发帖' }, { value: 'task', label: '发任务' }, { value: 'activity', label: '发活动' }]
 export type ComposeInitialData = {
   token: string
   kind: ComposeKind
