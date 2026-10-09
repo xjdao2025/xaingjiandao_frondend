@@ -43,6 +43,6 @@ XIANGJIAN_BACKEND_URL=http://gateway pnpm start
 
 `pnpm build` 生成 `dist/server` 和 `dist/client`；`pnpm start` 用 srvx 在 `0.0.0.0:3000` 运行服务端渲染并提供静态资源。[Dockerfile](Dockerfile) 执行同样的安装、构建和启动流程，镜像可用 `docker build -t xiangjian-frontend:local .` 构建。部署时将 `XIANGJIAN_BACKEND_URL` 设为容器内可访问的网关地址；不要将 `localhost` 当作另一容器的地址。镜像、网关、数据库、域名、TLS 和密钥由单独的部署配置管理。
 
-浏览器仍需通过**同一站点**访问 `/auth/semi/`、`/api/attachments`、`/pds/xrpc/com.atproto.sync.getBlob` 和 `/bsky/img/`；生产网关须将它们转到对应服务。其余 Rice/PDS/Post Cache 请求由前端服务端函数转发到 `XIANGJIAN_BACKEND_URL`。若历史图片 URL 指向内部 AppView，可用逗号分隔的 `XIANGJIAN_APPVIEW_IMAGE_ORIGINS` 指定允许改写为同源 `/bsky/img/` 的 origin；无此需求时留空。
+浏览器仍需通过**同一站点**访问 `/auth/semi/`、`/api/attachments`、`/img/`（rice 的帖子图片/头像缩略图）和 `/bsky/img/`；生产网关须将它们转到对应服务。其余 Rice/PDS/Post Cache 请求由前端服务端函数转发到 `XIANGJIAN_BACKEND_URL`。若历史图片 URL 指向内部 AppView，可用逗号分隔的 `XIANGJIAN_APPVIEW_IMAGE_ORIGINS` 指定允许改写为同源 `/bsky/img/` 的 origin；无此需求时留空。
 
 部署前运行上面的测试和构建，并核对网关、会话恢复、帖子与任务/活动的读取和写入。测试通过只证明本仓库的代码检查通过，不代表线上业务流程已经验收。

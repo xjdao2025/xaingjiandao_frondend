@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PdsImage, RiceSession } from '~/lib/models'
-import { MAX_POST_IMAGE_BYTES, newPostRecordKey, pdsBlobUrl, recordKeyFromUri, uploadPdsImage } from '~/lib/pds'
+import { MAX_POST_IMAGE_BYTES, newPostRecordKey, recordKeyFromUri, thumbUrl, uploadPdsImage } from '~/lib/pds'
 
 import {
   clearCachedFeed,
@@ -32,6 +32,8 @@ import {
   postTextParts,
   postTags,
 } from './tags'
+
+const thumbs = (did: string, cid: string) => ({ src: thumbUrl('feed', did, cid), fullsize: thumbUrl('full', did, cid) })
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
@@ -89,7 +91,7 @@ describe('post images', () => {
     const immediate = createdPostView(created, session)
     expect(immediate.record.embed).toEqual(record.embed)
     expect(immediate.images).toHaveLength(count)
-    expect(immediate.images?.[count - 1]).toMatchObject({ src: pdsBlobUrl(session.pds.did, images[count - 1].image.ref.$link), width: 1200, height: 800 })
+    expect(immediate.images?.[count - 1]).toMatchObject({ ...thumbs(session.pds.did, images[count - 1].image.ref.$link), width: 1200, height: 800 })
   })
 
   it('blocks more than nine images, invalid blob sizes, and galleries without real dimensions', async () => {
@@ -115,13 +117,13 @@ describe('post images', () => {
 
   it('normalizes raw repo embeds for feeds and detail without an arbitrary URL proxy', () => {
     const raw = { ...post, record: { ...post.record, embed: { $type: 'app.bsky.embed.images', images: [image] } } }
-    const expected = [{ src: pdsBlobUrl(post.author.did, image.image.ref.$link), alt: image.alt }]
+    const expected = [{ ...thumbs(post.author.did, image.image.ref.$link), alt: image.alt }]
     expect(normalizePostFeed({ posts: [raw] }).posts[0].images).toEqual(expected)
     expect(normalizePostThread({ thread: { post: raw } }).post.images).toEqual(expected)
     expect(normalizePostImages({ ...post, embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'javascript:alert(1)', fullsize: 'data:text/html,test', alt: '' }] } }).images).toBeUndefined()
   })
 
-  it('reads gallery thumbnails and record blobs, showing at most nine images', () => {
+  it('prefers rice thumbnails of record blobs over AppView views, showing at most nine images', () => {
     const items = Array.from({ length: 10 }, (_, index) => ({
       $type: 'app.bsky.embed.gallery#image',
       image: { ...image.image, ref: { $link: `bafkreigallery${index}` } },
@@ -141,15 +143,15 @@ describe('post images', () => {
     const gallery = { ...post, record, embed: { $type: 'app.bsky.embed.gallery#view', items: views } }
     const images = normalizePostFeed({ posts: [gallery] }).posts[0].images
     expect(images).toHaveLength(9)
-    expect(images?.[0]).toEqual({ src: 'https://cdn.example/0.jpg', fullsize: 'https://cdn.example/0-full.jpg', alt: '图片 1', width: 4, height: 3 })
-    expect(images?.[4]).toEqual({ src: pdsBlobUrl(post.author.did, items[4].image.ref.$link), alt: '图片 5', width: 4, height: 3 })
+    expect(images?.[0]).toEqual({ ...thumbs(post.author.did, 'bafkreigallery0'), alt: '图片 1', width: 4, height: 3 })
+    expect(images?.[4]).toEqual({ ...thumbs(post.author.did, items[4].image.ref.$link), alt: '图片 5', width: 4, height: 3 })
     expect(images?.[8]?.alt).toBe('图片 9')
-    expect(normalizePostThread({ thread: { post: { ...post, record } } }).post.images?.[0]?.src).toBe(pdsBlobUrl(post.author.did, items[0].image.ref.$link))
+    expect(normalizePostThread({ thread: { post: { ...post, record } } }).post.images?.[0]?.src).toBe(thumbUrl('feed', post.author.did, items[0].image.ref.$link))
   })
 
-  it('preserves external image URLs and maps only configured AppView origins to the same-origin gateway', () => {
+  it('without a record blob, preserves external image URLs and maps only configured AppView origins to the same-origin gateway', () => {
     vi.stubEnv('XIANGJIAN_APPVIEW_IMAGE_ORIGINS', 'https://internal-appview.example, https://previous-appview.example')
-    const viewed = { ...post, record: { ...post.record, embed: { $type: 'app.bsky.embed.images', images: [image] } }, embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/thumb.jpg', fullsize: 'https://cdn.bsky.app/full.jpg', alt: image.alt }] } }
+    const viewed = { ...post, embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/thumb.jpg', fullsize: 'https://cdn.bsky.app/full.jpg', alt: image.alt }] } }
     expect(normalizePostImages(viewed).images).toEqual([{ src: 'https://cdn.bsky.app/thumb.jpg', fullsize: 'https://cdn.bsky.app/full.jpg', alt: image.alt }])
     viewed.embed.images[0].thumb = 'https://internal-appview.example/img/thumb.jpg?format=jpeg'
     viewed.embed.images[0].fullsize = 'https://previous-appview.example/img/full.jpg'

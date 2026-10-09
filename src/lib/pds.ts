@@ -24,8 +24,15 @@ export async function uploadPdsImage(accessJwt: string, base64: string, contentT
   return blob
 }
 
-export function pdsBlobUrl(did: string, cid: string) {
-  return `/pds/xrpc/com.atproto.sync.getBlob?${new URLSearchParams({ did, cid })}`
+// rice 按档位缩好的 WebP（见 Rice.Thumbs）：信息流 800px 约 100KB，原图要 1MB
+export function thumbUrl(preset: 'feed' | 'full' | 'avatar', did: string, cid: string) {
+  return `/img/${preset}/${did}/${cid}`
+}
+
+const APPVIEW_AVATAR = /\/img\/avatar\/plain\/(did:plc:[a-z2-7]+)\/(bafkrei[a-z2-7]+)@/
+export function avatarUrl(url: string) {
+  const match = APPVIEW_AVATAR.exec(url)
+  return match ? thumbUrl('avatar', match[1], match[2]) : url
 }
 
 export function appviewImageUrl(url: string) {

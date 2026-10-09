@@ -2,7 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 
 import { backend, isSessionAuthError, searchParams } from '~/lib/http'
 import type { PdsImage, PostCategory, PostFeed, PostImage, PostThread, PostView, RicePublicUser, RiceSession } from '~/lib/models'
-import { appviewImageUrl, createPdsRecord, deleteOwnRecord, MAX_POST_IMAGE_BYTES, MAX_POST_IMAGES, MAX_POST_TEXT_LENGTH, pdsBlobUrl, pdsGet, POST_IMAGE_TYPES, uploadPdsImage, xrpcGet } from '~/lib/pds'
+import { appviewImageUrl, createPdsRecord, deleteOwnRecord, MAX_POST_IMAGE_BYTES, MAX_POST_IMAGES, MAX_POST_TEXT_LENGTH, pdsGet, thumbUrl, POST_IMAGE_TYPES, uploadPdsImage, xrpcGet } from '~/lib/pds'
 
 import { hasPostTag, postCategory } from './tags'
 
@@ -119,7 +119,7 @@ export function createdPostView(
       ...(reply ? { reply } : {}),
       ...(created.images?.length ? { embed: postImageEmbed(created.images) } : {}),
     },
-    ...(created.images?.length ? { images: created.images.map((item) => ({ src: pdsBlobUrl(session.pds.did, item.image.ref.$link), alt: item.alt, ...item.aspectRatio })) } : {}),
+    ...(created.images?.length ? { images: created.images.map((item) => ({ ...postImage(session.pds.did, item.image.ref.$link), alt: item.alt, ...item.aspectRatio })) } : {}),
     replyCount: 0,
     repostCount: 0,
     likeCount: 0,
@@ -192,6 +192,8 @@ async function hydrateAuthorNames(posts: PostView[]) {
   }))
 }
 
+const postImage = (did: string, cid: string) => ({ src: thumbUrl('feed', did, cid), fullsize: thumbUrl('full', did, cid) })
+
 export function normalizePostImages(post: PostView): PostView {
   const imageEmbed = (value: unknown) => {
     const embed = value as { $type?: string; images?: unknown[]; items?: unknown[]; media?: unknown } | undefined
@@ -210,12 +212,13 @@ export function normalizePostImages(post: PostView): PostView {
     const item = value as { thumb?: unknown; thumbnail?: unknown; fullsize?: unknown; alt?: unknown; image?: { ref?: { $link?: unknown }; cid?: unknown }; aspectRatio?: { width?: number; height?: number } }
     const original = originals?.[index] as typeof item | undefined
     const cid = item.image?.ref?.$link ?? item.image?.cid ?? original?.image?.ref?.$link ?? original?.image?.cid
-    const blobUrl = typeof cid === 'string' && /^[a-z0-9]+$/i.test(cid) ? pdsBlobUrl(post.author.did, cid) : undefined
+    const alt = typeof item.alt === 'string' ? item.alt : ''
+    if (typeof cid === 'string' && /^[a-z0-9]+$/i.test(cid)) return [{ ...postImage(post.author.did, cid), alt, ...item.aspectRatio }]
     const viewUrl = (url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url) ? appviewImageUrl(url) : undefined
     const fullsize = viewUrl(item.fullsize)
-    const src = viewUrl(item.thumb) ?? viewUrl(item.thumbnail) ?? fullsize ?? blobUrl
+    const src = viewUrl(item.thumb) ?? viewUrl(item.thumbnail) ?? fullsize
     if (!src) return []
-    return [{ src, ...(fullsize ? { fullsize } : {}), alt: typeof item.alt === 'string' ? item.alt : '', ...item.aspectRatio }]
+    return [{ src, ...(fullsize ? { fullsize } : {}), alt, ...item.aspectRatio }]
   })
   return images.length ? { ...post, images } : post
 }
