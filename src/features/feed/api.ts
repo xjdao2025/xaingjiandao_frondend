@@ -136,7 +136,7 @@ export function ownedInteractionUri(uri: string | undefined, did: string, collec
 }
 
 async function hydrateViewerRecords(posts: PostView[], did?: string, accessJwt?: string) {
-  // Post Cache is shared. Its viewer belongs to whoever populated it, not this reader.
+  // Lists are fetched without the reader's token, so any viewer state is not theirs.
   const publicPosts = posts.map(({ viewer: _viewer, ...post }) => post)
   if (!did || !accessJwt || posts.length === 0) return publicPosts
 
@@ -297,32 +297,26 @@ export type GetPostsInput = {
   query?: string; repo?: string; tag?: string; category?: PostCategory; cursor?: string; limit?: number; accessJwt?: string; did?: string
 }
 
+// aerox.feed.listPosts:只有顶层帖子(不含回复)、最新在前,下架的不出现。公开接口,直接走 AppView。
 export async function loadPostPage(data: GetPostsInput) {
   const query = data.query?.trim()
-  const page = !query && data.cursor ? Number(data.cursor) : 1
-  if (!Number.isSafeInteger(page) || page < 1) throw new Error('帖子页码无效')
-  const endpoint = query ? '/post/api/posts/search' : '/post/api/posts/list'
-  const requestBody = query
-    ? { q: query, limit: data.limit ?? 25, sort: 'latest', ...(data.cursor ? { cursor: data.cursor } : {}) }
-    : { page, per_page: data.limit ?? FEED_PAGE_SIZE, ...(data.repo ? { repo: data.repo } : {}), ...(data.tag ? { tag: data.tag } : {}) }
-  const payload = await backend<unknown>(endpoint, { method: 'POST', json: requestBody })
+  const first = !data.cursor
+  const payload = await backend<{ cursor?: string }>(`/bsky/xrpc/aerox.feed.listPosts?${searchParams({
+    q: query, author: data.repo, tag: data.tag?.replace(/^#/, ''), limit: data.limit ?? (query ? 25 : FEED_PAGE_SIZE), cursor: data.cursor,
+  })}`)
 
   const feed = normalizePostFeed(payload)
   const [timelineReposts, ownPosts] = await Promise.all([
-    !query && !data.repo && page === 1 ? loadTimelineReposts(data.accessJwt) : [],
-    !query && page === 1 && data.did && data.accessJwt && (!data.repo || data.repo === data.did)
+    !query && !data.repo && first ? loadTimelineReposts(data.accessJwt) : [],
+    !query && first && data.did && data.accessJwt && (!data.repo || data.repo === data.did)
       ? loadOwnRecentPosts(data.did, data.accessJwt) : [],
   ])
   const indexedUris = new Set(feed.posts.map(post => post.uri))
   const posts = mergeFeedPosts([...feed.posts, ...ownPosts.filter(post => !indexedUris.has(post.uri))], timelineReposts).filter((post) =>
     (!data.tag || hasPostTag(post.record.text, data.tag)) && (!data.category || postCategory(post.record) === data.category))
-  const body = payload as { cursor?: unknown; page?: number; total?: number }
-  const currentPage = body.page ?? page
   return {
     posts: await hydrateAuthorNames(await hydrateViewerRecords(posts, data.did, data.accessJwt)),
-    cursor: query
-      ? typeof body.cursor === 'string' && body.cursor ? body.cursor : null
-      : currentPage * (data.limit ?? FEED_PAGE_SIZE) < (body.total ?? 0) ? String(currentPage + 1) : null,
+    cursor: payload.cursor || null,
   }
 }
 
