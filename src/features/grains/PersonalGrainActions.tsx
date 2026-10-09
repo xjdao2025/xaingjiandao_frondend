@@ -146,7 +146,7 @@ function SendGrainForm({ session, to }: { session: RiceSession; to?: string }) {
       {receipt ? <><strong role="status">已送给 @{receipt.to.handle} {receipt.amount} 稻米</strong><Link to="/me/grains">查看稻米记录</Link><div className="form-actions"><Button label="完成" variant="primary" onClick={() => void navigate({ to: '/me/grains' })} /></div></> : <>
         <p className="muted">个人测试稻米</p>
         <div className="grain-recipient-field">
-          <TextInput label="送给谁" value={identifier} onChange={changeIdentifier} onBlur={() => autoCheck(identifier)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) autoCheck(identifier) }} description="填写手机号、完整用户名或 DID。" isDisabled={busy || confirming } width="100%" />
+          <TextInput label="送给谁" value={identifier} onChange={changeIdentifier} onBlur={() => autoCheck(identifier)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) autoCheck(identifier) }} description="填写手机号、邮箱、完整用户名或 DID。" isDisabled={busy || confirming } width="100%" />
           <IconButton label="扫一扫" icon={<ScanLine size={22} />} variant="ghost" isDisabled={busy || confirming } onClick={() => void navigate({ to: '/me/grains/send/scan', search: {} })} />
         </div>
         {recipient && !confirming && <div role="status">送给：<strong>{recipient.nickname || recipient.handle}</strong>（@{recipient.handle}）</div>}
