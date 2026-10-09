@@ -304,9 +304,7 @@ export async function loadPostPage(data: GetPostsInput) {
   const endpoint = query ? '/post/api/posts/search' : '/post/api/posts/list'
   const requestBody = query
     ? { q: query, limit: data.limit ?? 25, sort: 'latest', ...(data.cursor ? { cursor: data.cursor } : {}) }
-    : { page, per_page: data.limit ?? FEED_PAGE_SIZE, ...(data.repo ? { repo: data.repo } : {}), ...(data.tag ? { key: `#${data.tag.replace(/^#/, '')}` } : {}) }
-  // 标签按正文找（key）：post-cache 的 tags 列只有新帖有，历史帖子没回填。
-  // 「#活动家」也会被带出来，下面 hasPostTag 再精确筛一次。
+    : { page, per_page: data.limit ?? FEED_PAGE_SIZE, ...(data.repo ? { repo: data.repo } : {}), ...(data.tag ? { tag: data.tag } : {}) }
   const payload = await backend<unknown>(endpoint, { method: 'POST', json: requestBody })
 
   const feed = normalizePostFeed(payload)
