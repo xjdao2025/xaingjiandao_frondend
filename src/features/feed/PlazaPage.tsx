@@ -1,5 +1,6 @@
 import { Button } from '@astryxdesign/core/Button'
 import { Carousel, type CarouselHandle } from '@astryxdesign/core/Carousel'
+import { Link } from '@tanstack/react-router'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -11,7 +12,7 @@ import type { PostFeed } from '~/lib/models'
 import { useStoredSession } from '../session/session'
 import { getPosts, readCachedFeed, writeCachedFeed } from './api'
 import { bannerHref, type Banner } from './banners'
-import { postCategory } from './tags'
+import { PLAZA_TAGS, postCategory, type PlazaTag } from './tags'
 import { errorMessage, mergeBy } from '~/lib/util'
 
 const BANNER_ROTATION_MS = 6_000
@@ -51,14 +52,22 @@ function PlazaBanner({ banners }: { banners: Banner[] }) {
   </div>
 }
 
-export function PlazaPage({ initialFeed, banners }: { initialFeed: PostFeed; banners: Banner[] }) {
-  const { session } = useStoredSession()
-  const did = session?.pds.did
-  const scopedFeed = useMemo(() => readCachedFeed(did) ?? { ...initialFeed, posts: initialFeed.posts.map(({ viewer: _viewer, ...post }) => post) }, [did, initialFeed])
-  return <PlazaFeed key={did ?? 'guest'} initialFeed={scopedFeed} banners={banners} />
+function PlazaTags({ active }: { active?: PlazaTag }) {
+  return <nav className="plaza-tags" aria-label="常用标签">
+    {PLAZA_TAGS.map((tag) => <Link key={tag} to="/" search={tag === active ? {} : { tag }} className="plaza-tag" aria-current={tag === active ? 'true' : undefined}>#{tag}</Link>)}
+  </nav>
 }
 
-function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: Banner[] }) {
+export function PlazaPage({ initialFeed, banners, tag }: { initialFeed: PostFeed; banners: Banner[]; tag?: PlazaTag }) {
+  const { session } = useStoredSession()
+  const did = session?.pds.did
+  const scopedFeed = useMemo(() => (tag ? null : readCachedFeed(did)) ?? { ...initialFeed, posts: initialFeed.posts.map(({ viewer: _viewer, ...post }) => post) }, [did, initialFeed, tag])
+  return <PlazaFeed key={`${did ?? 'guest'}:${tag ?? ''}`} initialFeed={scopedFeed} banners={banners} tag={tag} />
+}
+
+function PlazaFeed({ initialFeed, banners, tag }: { initialFeed: PostFeed; banners: Banner[]; tag?: PlazaTag }) {
+  // 选了标签就看这个标签下的全部帖子（活动、商品分类的也算），不读写首页缓存
+  const filter = tag ? { tag } : { category: 'post' as const }
   const [feed, setFeed] = useState(initialFeed)
   const [isLoading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -82,12 +91,12 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
   useEffect(() => {
     request.current++
     if (!isReady) return
-    const cachedFeed = reloadKey === 0 ? readCachedFeed(did) : null
+    const cachedFeed = reloadKey === 0 && !tag ? readCachedFeed(did) : null
     if (reloadKey === 0 && (cachedFeed || !did)) {
       // Guests start from the server-rendered feed, which becomes their cache.
       setLoading(false)
       setError('')
-      if (!cachedFeed) writeCachedFeed(initialFeed)
+      if (!cachedFeed && !tag) writeCachedFeed(initialFeed)
       setFeed(cachedFeed ?? initialFeed)
       return () => { request.current++ }
     }
@@ -96,16 +105,16 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
     const current = request.current
     setLoading(true)
     setError('')
-    void getPosts({ data: { accessJwt, did, category: 'post' } })
+    void getPosts({ data: { accessJwt, did, ...filter } })
       .then((nextFeed) => {
         if (current !== request.current) return
-        writeCachedFeed(nextFeed, did)
+        if (!tag) writeCachedFeed(nextFeed, did)
         setFeed(nextFeed)
       })
       .catch((reason) => { if (current === request.current) setError(errorMessage(reason, '帖子暂时无法加载')) })
       .finally(() => { if (current === request.current) setLoading(false) })
     return () => { request.current++ }
-  }, [accessJwt, did, initialFeed, isReady, reloadKey])
+  }, [accessJwt, did, initialFeed, isReady, reloadKey, tag])
 
   const more = async () => {
     if (!feed.cursor || isLoading) return
@@ -113,11 +122,11 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
     setLoading(true)
     setError('')
     try {
-      const page = await getPosts({ data: { accessJwt, did, category: 'post', cursor: feed.cursor } })
+      const page = await getPosts({ data: { accessJwt, did, ...filter, cursor: feed.cursor } })
       if (current !== request.current) return
       const next = { ...page, posts: mergeBy([...feed.posts, ...page.posts], (post) => post.reason?.uri ?? post.uri) }
       setFeed(next)
-      writeCachedFeed(next, did)
+      if (!tag) writeCachedFeed(next, did)
     } catch (reason) {
       if (current === request.current) setError(errorMessage(reason, '帖子暂时无法加载'))
     } finally { if (current === request.current) setLoading(false) }
@@ -141,6 +150,7 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
   return (
     <div className="page plaza-page">
       <PlazaBanner banners={banners} />
+      <PlazaTags active={tag} />
       {error ? (
         <div className="inline-error" role="alert">
           <span>{error}</span>
@@ -149,7 +159,7 @@ function PlazaFeed({ initialFeed, banners }: { initialFeed: PostFeed; banners: B
       ) : null}
 
       <section className="feed-section">
-        <PostList posts={feed.posts.filter((post) => postCategory(post.record) === 'post')} onRepostChange={handleRepostChange} onPostDeleted={handlePostDeleted} />
+        <PostList posts={tag ? feed.posts : feed.posts.filter((post) => postCategory(post.record) === 'post')} onRepostChange={handleRepostChange} onPostDeleted={handlePostDeleted} />
         {feed.cursor && <AutoLoadMore key={did ?? 'guest'} cursor={feed.cursor} loading={isLoading || !isReady} failed={!!error} onLoadMore={more} />}
       </section>
 
