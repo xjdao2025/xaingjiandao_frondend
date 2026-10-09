@@ -1,16 +1,17 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { requestPersonalTransfer, requestTransferRecipient, walletEntryIncoming, type WalletEntry } from './api'
+import { requestPersonalTransfer, requestTransferRecipients, walletEntryIncoming, type WalletEntry } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
-it('resolves phone and username recipients only through the authenticated Rice preview endpoint', async () => {
+it('looks up recipients through the authenticated Rice search endpoint', async () => {
   const recipient = { id: 'receiver', did: 'did:plc:receiver', handle: 'receiver.example', nickname: '禾' }
-  const fetch = vi.fn().mockImplementation(() => Response.json({ data: recipient }))
+  const fetch = vi.fn().mockImplementation(() => Response.json({ data: [recipient], exact: true }))
   vi.stubGlobal('fetch', fetch)
-  for (const [identifier, to] of [[' 13800138000 ', '13800138000'], [' @receiver.example ', 'receiver.example']]) {
-    expect(await requestTransferRecipient({ token: 'rice-token', identifier })).toEqual(recipient)
+  for (const [identifier, q] of [[' 13800138000 ', '13800138000'], [' @receiver.example ', 'receiver.example'], ['禾', '禾']]) {
+    expect(await requestTransferRecipients({ token: 'rice-token', identifier })).toEqual({ exact: true, users: [recipient] })
     const [url, init] = fetch.mock.calls.at(-1)!
-    expect(url).toMatch(/\/api\/grain_transfers\/recipient$/)
-    expect(init).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer rice-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) })
+    expect(new URL(url, 'https://x.test').pathname).toBe('/api/grain_transfers/recipients')
+    expect(new URL(url, 'https://x.test').searchParams.get('q')).toBe(q)
+    expect(init).toMatchObject({ headers: { Authorization: 'Bearer rice-token' } })
   }
 })
 it('sends personal gifts with Rice auth, rejects invalid amounts before transport and refuses incomplete receipts', async () => {

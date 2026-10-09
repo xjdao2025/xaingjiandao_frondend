@@ -280,6 +280,8 @@ input:-webkit-autofill:focus {
 .grain-recipient-field { position: relative; min-width: 0; }
 .grain-recipient-field .astryx-text-input { padding-right: 48px; }
 .grain-recipient-field > button { position: absolute; right: 4px; bottom: 4px; }
+.grain-recipient-candidates { border: 1px solid var(--xj-line); border-radius: 10px; overflow: hidden; }
+.grain-recipient-candidates .person-row { cursor: pointer; }
 .grain-scanner-video { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; background: #101c17; }
 .alliance-stats.grain-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .alliance-stats.grain-metrics > :is(div, a) { padding: 18px 8px; background: var(--xj-surface-tint); }

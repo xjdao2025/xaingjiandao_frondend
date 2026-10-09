@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { backendData } from '~/lib/http'
+import { backend, backendData, withQuery } from '~/lib/http'
 import type { RicePublicUser } from '~/lib/models'
 
 export type WalletEntry = { id: string; kind: 'reserved' | 'refunded' | 'grant' | 'gift' | 'reward' | 'task_reward' | 'event_fee' | 'community_fund'; amount: number; memo?: string | null; subject_uri: string | null; inserted_at: string; from_user: Pick<RicePublicUser, 'id' | 'nickname' | 'handle'> | null; to_user: Pick<RicePublicUser, 'id' | 'nickname' | 'handle'> | null; from_node?: { id: string; name: string } | null; to_node?: { id: string; name: string } | null }
@@ -25,14 +25,15 @@ export const sendPersonalGrains = createServerFn({ method: 'POST' })
   .validator((data: PersonalTransferInput) => data)
   .handler(({ data }) => requestPersonalTransfer(data))
 type TransferRecipientInput = { token: string; identifier: string }
-export async function requestTransferRecipient(data: TransferRecipientInput) {
-  return backendData<RicePublicUser>('/api/grain_transfers/recipient', {
-    method: 'POST', token: data.token, json: { to: data.identifier.trim().replace(/^@/, '') },
-  })
+// 精确命中只有一个人(exact);否则是按昵称 / handle 找到的候选,可能为空
+export type TransferRecipients = { exact: boolean; users: RicePublicUser[] }
+export async function requestTransferRecipients(data: TransferRecipientInput): Promise<TransferRecipients> {
+  const body = await backend<{ data: RicePublicUser[]; exact: boolean }>(withQuery('/api/grain_transfers/recipients', { q: data.identifier.trim().replace(/^@/, '') }), { token: data.token })
+  return { exact: body.exact, users: body.data }
 }
-export const getTransferRecipient = createServerFn({ method: 'POST' })
+export const findTransferRecipients = createServerFn({ method: 'POST' })
   .validator((data: TransferRecipientInput) => data)
-  .handler(({ data }) => requestTransferRecipient(data))
+  .handler(({ data }) => requestTransferRecipients(data))
 
 export const fundCommunity = createServerFn({ method: 'POST' })
   .validator((data: { token: string; nodeId: string; amount: number; clientRequestId: string }) => data)

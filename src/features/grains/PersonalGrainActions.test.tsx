@@ -9,7 +9,7 @@ const mock = vi.hoisted(() => ({
   parent: [] as unknown[], child: [] as unknown[], key: '', scanning: false,
   navigate: vi.fn(),
 }))
-vi.mock('./api', () => ({ getTransferRecipient: mock.recipient, sendPersonalGrains: mock.send }))
+vi.mock('./api', () => ({ findTransferRecipients: mock.recipient, sendPersonalGrains: mock.send }))
 vi.mock('../session/session', () => ({ useStoredSession: () => ({ session: mock.session }), readStoredSession: () => mock.stored }))
 vi.mock('@tanstack/react-router', async (original) => ({
   ...await original<typeof import('@tanstack/react-router')>(), Link: () => null,
@@ -47,6 +47,7 @@ const session = {
 } as RiceSession
 const recipient = { id: 'bob-id', did: 'did:plc:bob', handle: 'bob.example', nickname: 'Bob', avatar: null }
 const receipt = { id: 'transfer-1', amount: 12, to: recipient }
+const found = { exact: true, users: [recipient] }
 
 function elements(node: ReactNode): Array<ReactElement<Record<string, unknown>>> {
   if (Array.isArray(node)) return node.flatMap(elements)
@@ -79,7 +80,7 @@ async function confirmRecipient(identifier = '@bob.example') {
 
 beforeEach(() => {
   mock.session = session; mock.stored = session
-  mock.recipient.mockResolvedValue(recipient)
+  mock.recipient.mockResolvedValue(found)
   mock.navigate.mockImplementation(async ({ to }: { to: string }) => { mock.scanning = to === '/me/grains/send/scan' })
   vi.stubGlobal('window', Object.assign(new EventTarget(), { location: { origin: 'https://community.example' } }))
 })
@@ -150,6 +151,33 @@ it('reports an unknown phone after input and keeps the form editable', async () 
   expect(field('送给谁')?.isDisabled).toBe(false)
 })
 
+it('lists candidates for an inexact name and sends to the one picked', async () => {
+  const carol = { id: 'carol-id', did: 'did:plc:carol', handle: 'carol.example', nickname: 'Bob 的朋友', avatar: null }
+  mock.recipient.mockResolvedValueOnce({ exact: false, users: [recipient, carol] })
+  change('送给谁', 'bob'); change('送多少稻米', '12')
+  await action('下一步')()
+  expect(confirmation()).toBeUndefined()
+  const options = () => render().filter((node) => node.props.role === 'option')
+  expect(options()).toHaveLength(2)
+  expect(elements(options()[1].props.children as ReactNode).some((node) => node.props.children === 'did:plc:carol')).toBe(true)
+  ;(options()[1].props.onClick as () => void)()
+  expect(options()).toHaveLength(0)
+  expect(field('送给谁')?.value).toBe('carol.example')
+  ;(field('送给谁')!.onBlur as () => void)()
+  await action('下一步')()
+  expect(mock.recipient).toHaveBeenCalledTimes(1)
+  mock.send.mockResolvedValueOnce({ ...receipt, to: carol })
+  await action('确认送出')()
+  expect(mock.send).toHaveBeenCalledWith({ data: expect.objectContaining({ to: 'carol-id', amount: 12 }) })
+})
+
+it('reports no match when the search finds nobody', async () => {
+  mock.recipient.mockResolvedValueOnce({ exact: false, users: [] })
+  change('送给谁', '没有这个人')
+  ;(field('送给谁')!.onBlur as () => void)()
+  await vi.waitFor(() => expect(render().find((node) => node.props.role === 'alert')?.props.children).toBe('没找到这位伙伴，再核对一下账号。'))
+})
+
 it('checks a scanned recipient once before sending', async () => {
   change('送多少稻米', '12')
   ;(field('扫一扫')!.onClick as () => void)()
@@ -167,36 +195,36 @@ it('checks a scanned recipient once before sending', async () => {
 })
 
 it('reuses a blur lookup when the user immediately presses next', async () => {
-  let finish!: (value: typeof recipient) => void
+  let finish!: (value: typeof found) => void
   mock.recipient.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
   change('送给谁', '13800138000'); change('送多少稻米', '12')
   ;(field('送给谁')!.onBlur as () => void)()
   expect(field('下一步')?.isDisabled).toBe(false)
   const pending = action('下一步')()
   expect(mock.recipient).toHaveBeenCalledTimes(1)
-  finish(recipient); await pending
+  finish(found); await pending
   expect(confirmation()).toBeDefined()
 })
 
 it('ignores a recipient lookup after the identifier changes', async () => {
-  let finish!: (value: typeof recipient) => void
+  let finish!: (value: typeof found) => void
   mock.recipient.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
   change('送给谁', '13800138000')
   ;(field('送给谁')!.onBlur as () => void)()
   change('送给谁', '13900139000')
-  finish(recipient); await Promise.resolve()
+  finish(found); await Promise.resolve()
   expect(render().find((node) => node.props.role === 'status')).toBeUndefined()
   expect(field('送给谁')?.value).toBe('13900139000')
 })
 
 it('ignores a recipient lookup after switching accounts', async () => {
-  let finish!: (value: typeof recipient) => void
+  let finish!: (value: typeof found) => void
   mock.recipient.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
   change('送给谁', '13800138000')
   ;(field('送给谁')!.onBlur as () => void)()
   mock.session = { ...session, token: 'rice-carol' }; mock.stored = mock.session
   render()
-  finish(recipient); await Promise.resolve()
+  finish(found); await Promise.resolve()
   expect(render().find((node) => node.props.role === 'status')).toBeUndefined()
 })
 
@@ -214,7 +242,7 @@ it('retries a failed send with the same request id, so it can only be debited on
 })
 
 it('rejects transfers to self before any write', async () => {
-  mock.recipient.mockResolvedValueOnce({ ...recipient, did: session.pds.did })
+  mock.recipient.mockResolvedValueOnce({ exact: true, users: [{ ...recipient, did: session.pds.did }] })
   await confirmRecipient()
   expect(render().find((node) => node.props.role === 'alert')?.props.children).toBe('不能送给自己。')
   expect(field('确认送出')).toBeUndefined()
