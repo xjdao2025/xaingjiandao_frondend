@@ -272,7 +272,15 @@ function mergeFeedPosts(posts: PostView[], reposts: PostView[]) {
       seenReposts.add(key)
       return true
     })
-    .sort((a, b) => (b.reason?.indexedAt ?? b.indexedAt).localeCompare(a.reason?.indexedAt ?? a.indexedAt))
+    .sort((a, b) => sortAt(b).localeCompare(sortAt(a)))
+}
+
+// AppView 的 sortAt:min(createdAt, indexedAt)。迁移后重新索引过的旧帖 indexedAt 全是索引那天,
+// 只按 indexedAt 排会打乱;转发按转发时间。
+function sortAt(post: PostView) {
+  if (post.reason) return post.reason.indexedAt
+  const created = post.record.createdAt
+  return created && created < post.indexedAt ? created : post.indexedAt
 }
 
 export function normalizePostThread(payload: unknown): PostThread {
